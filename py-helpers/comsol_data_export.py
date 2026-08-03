@@ -1,5 +1,5 @@
 # Author: Niko Bleidistel
-# last change: 2026-06-26
+# last change: 2026-08-02
 
 ##############################################################################
 # import packages
@@ -15,6 +15,12 @@ import pathlib                          # for handling file paths
 import csv                              # for handling csv files
 
 import re                               # for regular expressions
+
+import importlib
+
+#custom packages
+import time_logging as tl               # for logging time of function calls (custom python file)
+importlib.reload(tl)
 
 ##############################################################################
 ##############################################################################
@@ -62,6 +68,7 @@ def import_models(MODELNAME_LIST: list[str],
     # manage model (following: https://mph.readthedocs.io/en/1.3/tutorial.html)
     if client is None:
         client = mph.start()
+        tl.log_message('New comsol multiphysics client started.')
     elif not isinstance(client, mph.Client):
         raise TypeError("The argument 'client' needs to be an instance of 'mph.Client' or None.")
     
@@ -86,6 +93,7 @@ def import_models(MODELNAME_LIST: list[str],
         # print(f'Loading model from path: {path}')
         model = client.load(path)
         model_list.append(model)
+        tl.log_message(f'Model "{model.name()}" loaded from path: {path}')
 
     # print Feedback if wanted
     if printFeedback:
@@ -268,6 +276,7 @@ def save_Parameter_List_to_CSV(model: mph.Model,
     
     df_params = pd.DataFrame(params)
     df_params.to_csv(csv_path, index=False)
+    tl.log_message(f'Parameters of model "{model.name()}" saved to CSV file: {csv_path}')
 
     if displayParams:
         display(df_params)
@@ -437,6 +446,8 @@ def set_DataFrame_as_Parameters(model:mph.Model, df: pd.DataFrame, isRemove=Fals
             model.parameter(row.name, row.value) # type: ignore
             model.description(row.name, row.description) # type: ignore
 
+    tl.log_message(f'Parameters of model "{model.name()}" updated. Removed: {isRemove}.')
+
 ##############################################################################
 
 def set_Parameter_List_from_CSV(model:mph.Model, 
@@ -518,6 +529,8 @@ def set_Parameter_List_from_CSV(model:mph.Model,
         if printFeedback:
             print_different_Parameters(df_removed=df_removed, df_added=df_added, df_changed=df_changed)
 
+    tl.log_message(f'Parameters of model "{model.name()}" updated from CSV file: {csv_path}.')
+
 ##############################################################################
 ##############################################################################
 
@@ -581,8 +594,10 @@ def Comsol_TXT_to_CSV(txt_file_path: str, csv_file_path: str, printFeedback = Tr
         writer.writeheader()
         writer.writerows(rows)
 
+    message = f"TXT file '{txt_file_path}' successfully converted to CSV file '{csv_file_path}'."
+    tl.log_message(message)
     if printFeedback:
-        print(f"TXT file '{txt_file_path}' successfully converted to CSV file '{csv_file_path}'.")
+        print(message)
 
 ##############################################################################
 
@@ -615,8 +630,10 @@ def CSV_to_Comsol_TXT(csv_file_path: str, txt_file_path: str, printFeedback = Tr
                     f'{row["name"]} {row["value"]} "{row["description"]}"\n'
                 )
                 txt_file.write(line)
+    message = f"CSV file '{csv_file_path}' successfully converted to TXT file '{txt_file_path}'."
+    tl.log_message(message)
     if printFeedback:
-        print(f"CSV file '{csv_file_path}' successfully converted to TXT file '{txt_file_path}'.")
+        print(message)
 
 ##############################################################################
 ############################################################################## 
@@ -740,8 +757,10 @@ def add_sweep_parameter(model:mph.Model,
     model.java.study(study_id).feature(feature_id).set('pname', parameternames)
     model.java.study(study_id).feature(feature_id).set('plistarr', parametervalues)
 
+    message = f"Sweep parameter(s) '{parameternames}' with value(s) '{parametervalues}' added to feature '{featurename}' of study '{studyname}' of the model '{model.java.label()}'."
+    tl.log_message(message)
     if printFeedback:
-        print(f"Sweep parameter(s) '{parameternames}' with value(s) '{parametervalues}' added to feature '{featurename}' of study '{studyname}' of the model '{model.java.label()}'.")
+        print(message)
 
 ##############################################################################
 ##############################################################################
@@ -795,6 +814,7 @@ def save_as_copy(model: mph.Model,
             # Resets modeling history to clear further internal cached data
             model.reset()
         model.save()
+        tl.log_message(f'Model "{model.name()}" saved to its original path: {full_export_path}')
         return
     
     # Get the previous preference state for excluding data in MPH files
@@ -806,6 +826,7 @@ def save_as_copy(model: mph.Model,
 
         # Save the model to the new path without modifying the active RAM state
         model.java.save(full_export_path, True)
+        tl.log_message(f'Model "{model.name()}" saved as a copy to: {full_export_path} (smallerFilesize={smallerFilesize})')
         
     finally:
         # Revert the exclusion setting to its original state
@@ -892,8 +913,10 @@ def override_export_variables(model: mph.Model,
         descriptions = [""] * len(expressions)
     target_node.set("expr", expressions)
     target_node.set("descr", descriptions)
-    
-    print(f"Variables successfully added to export '{export_node_name}'.")
+
+    message = f"Variables successfully added to export '{export_node_name}' of model '{model.name()}'."
+    tl.log_message(message)
+    print(message)
 
 ##############################################################################
 ##############################################################################
@@ -980,10 +1003,16 @@ def parameter_sweep(model: mph.Model,
 
     sweep_parameters = list(zip(parameternames, parametervalues))
     paths = []
-    print(f"Starting parameter sweep for study '{studyname}' with parameters {parameternames}.\n")
+
+    message = f"Starting parameter sweep on model '{MODELNAME}' for study '{studyname}' with parameters {parameternames}."
+    tl.log_message(message)
+    print(f"{message}\n")
+
     first_iteration = True
     for iteration in range(len(parametervalues[0])):
-        print(f"Iteration {iteration+1}/{len(parametervalues[0])} with parameter values {[paramvalues[iteration] for _, paramvalues in sweep_parameters]}.")
+        message = f"Iteration {iteration+1}/{len(parametervalues[0])} with parameter values {[paramvalues[iteration] for _, paramvalues in sweep_parameters]}."
+        tl.log_message(message)
+        print(message)
 
         # set the current parameter values for this iteration
         print("Setting parameters...")
@@ -1014,26 +1043,36 @@ def parameter_sweep(model: mph.Model,
 
 
         # solve the study
-        print(f"Running study '{studyname}'...")
+        message = f"Running study '{studyname}' for iteration {iteration+1}..."
+        tl.log_message(message)
+        print(message)
         try:
             model.solve(studyname)
         except Exception as e:
-            print(f"ERROR occurred while solving study '{studyname}' for iteration {iteration+1}: \n\n{e}\n\n")
+            message = f"ERROR occurred while solving study '{studyname}' for iteration {iteration+1}: \n\n{e}\n\n"
+            tl.log_message(message)
+            print(message)
 
             with open(str(folder_path / "errormessage.txt"), "w", encoding="utf-8") as destination:
                 destination.write(f"ERROR occurred while solving study '{studyname}' for iteration {iteration+1}:\n\n")
                 destination.write(str(e))
-            
-            print(f"Error message saved to {folder_path / 'errormessage.txt'}")
+
+            message = f"Error message saved to {folder_path / 'errormessage.txt'}"
+            tl.log_message(message)
+            print(message)
             if saveSolutions:
                 print(f"saving failed model to {path}...")
                 save_as_copy(model, client, str(path)+".mph", smallerFilesize = False)
 
-            print("Not generating data export and continuing with the next one.")
+            message = f"Skipping data export for iteration {iteration+1} due to the error."
+            tl.log_message(message)
+            print(message)
             continue  # Skip to the next iteration if an error occurs
 
         # export the results with the current parameter values
-        print(f"Exporting results to {export_path}...")
+        message = f"Exporting results for iteration {iteration+1}..."
+        tl.log_message(message)
+        print(message)
         EXPORT_NODE_NAME="PySweepExport"
         
         
@@ -1044,15 +1083,283 @@ def parameter_sweep(model: mph.Model,
         model.export(EXPORT_NODE_NAME, str(path) + ".txt")
 
         if saveSolutions:
-            print(f"saving model solution to {path}...")
+            message = f"Saving model solution for iteration {iteration+1} to {path}..."
+            tl.log_message(message)
+            print(message)
             save_as_copy(model, client, str(path)+".mph", smallerFilesize = False)
             paths.append(path)
 
-        print(f"Iteration {iteration+1} completed.\n")
+        message = f"Iteration {iteration+1} completed."
+        tl.log_message(message)
+        print(f"{message}\n")
 
-    print("Parameter sweep completed.")
+    message = f"Parameter sweep for model '{MODELNAME}' completed."
+    tl.log_message(message)
+    print(message)
     return paths
         
 
 ##############################################################################
 ##############################################################################
+
+def simulate_model(
+        # path settings
+        filename: str,
+        input_folder: pathlib.Path,
+        output_folder: pathlib.Path,
+
+        # simulation settings
+        client: mph.client.Client,
+        export_params: list,
+        export_descriptions: list,
+
+        # boolean flags    
+        export_parameters_to_csv: bool = True,
+        extend_export_from_params_in_csv: bool = True,
+        show_model_info: bool = False,
+        solve_model: bool = True,
+        save_solved_model: bool = True,
+        export_solution_data: bool = True,
+        save_small_model_version: bool = True,
+        new_log_file: bool = False,
+    ):
+    """
+    Simulates a COMSOL Multiphysics model by importing it, optionally exporting parameters to CSV, solving the model, exporting solution data, and saving different versions of the model.
+    
+    Args:
+        filename (str): The name of the COMSOL model file to be imported.
+        input_folder (pathlib.Path): The folder path where the input model file is located.
+        output_folder (pathlib.Path): The folder path where output files will be saved.
+        client (mph.client.Client): An instance of the COMSOL client for model operations.
+        export_params (list): A list of parameters to be exported from the model.
+        export_descriptions (list): A list of descriptions corresponding to the export parameters. If you dont want to use descriptions, you can provide an empty list.
+        export_parameters_to_csv (bool): If True, exports model parameters to a CSV file.
+        extend_export_from_params_in_csv (bool): If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
+        show_model_info (bool): If True, prints model information including parameters, materials, physics, and studies.
+        solve_model (bool): If True, solves the model. If model is already solved, this can be set to False to save time.
+        save_solved_model (bool): If True, saves a copy of the solved model.
+        export_solution_data (bool): If True, exports solution data from the model.
+        save_small_model_version (bool): If True, saves a smaller version of the model without solutions but with settings, parameters, and configured exports.
+        new_log_file (bool): If True, initializes a new log file for this simulation run.
+
+    Returns:
+        None
+    """
+    if tl.LOG_PATH is None or new_log_file:
+        last_log_path = tl.LOG_PATH
+        tl.initialize_time_log(output_folder / "simulation_log.txt")
+
+    # Import the model from the specified input folder
+    client, model_list = import_models(
+            client=client, 
+            MODELNAME_LIST=[filename], 
+            printFeedback=True,
+            avoid_reimporting=True,
+            path_to_models=str(input_folder),
+            )
+
+    # this function only uses one model
+    model = model_list[0]
+    modelname = client.names()[0]
+
+    # Time logging
+    tl.log_message(f"Working with model {modelname}.")
+
+    # export model parameters to CSV
+    if export_parameters_to_csv:
+        output_csv_path = output_folder / f"{modelname}_parameters.csv"
+        save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
+
+    if extend_export_from_params_in_csv:
+        # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
+        df_parameters = pd.read_csv(output_csv_path)
+        export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
+        export_params.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
+
+    if show_model_info:
+        # print parameters, materials, physics, and studies of the model
+        _ = print_model_info(model)
+
+        # Display the model tree structure
+        mph.tree(model)
+
+    if solve_model:
+        # Time logging
+        tl.log_message(f"Solving {modelname}...")
+
+        # Solve the model
+        model.solve()
+
+        # Time logging        
+        tl.log_message(f"Finished solving {modelname}.")
+
+        # save the solved model
+        if save_solved_model:
+            save_as_copy(model, client, str(output_folder / f"{modelname}_solved.mph"), smallerFilesize=False)
+    else:
+        tl.log_message(f"Skipping solving {modelname} as per user request.")
+
+    if export_solution_data:
+        # export data from the model
+        override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
+        model.export("PyExport", output_folder / f"{modelname}_exported_data.txt")
+
+        # Time logging
+        tl.log_message(f"Exported {modelname} solution data")
+
+    if save_small_model_version:
+        # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
+        save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+
+    # explicitly clear all models from server
+    client.clear() 
+
+    # time logging
+    tl.log_message(f"Cleared {modelname} from client.")
+
+    if last_log_path is None:
+        tl.LOG_PATH = None
+    elif new_log_file:
+        tl.initialize_time_log(last_log_path)  # restore the previous log file path if it was changed
+
+##############################################################################
+
+def sweep_model(
+        # path settings
+        filename: str,
+        input_folder: pathlib.Path,
+        output_folder: pathlib.Path,
+
+        # sweep settings
+        client: mph.client.Client,
+        export_params: list,
+        export_descriptions: list,
+        sweep_parameter: list,
+        sweep_values: list,
+
+        # boolean flags    
+        export_parameters_to_csv: bool = True,
+        extend_export_from_params_in_csv: bool = True,
+        show_model_info: bool = False,
+        save_solved_model: bool = True,
+        export_solution_data: bool = True,
+        save_small_model_version: bool = True,
+        new_log_file: bool = False,
+    ):
+    """
+    Sweeps a COMSOL model over a range of parameter values and exports the results.
+
+    Args:
+        filename (str): The name of the COMSOL model file to be imported.
+        input_folder (pathlib.Path): The folder path where the input model file is located.
+        output_folder (pathlib.Path): The folder path where output files will be saved.
+        client (mph.client.Client): An instance of the COMSOL client for model operations.
+        export_params (list): A list of parameters to be exported from the model.
+        export_descriptions (list): A list of descriptions corresponding to the export parameters. If you dont want to use descriptions, you can provide an empty list.
+        sweep_parameter (list): A list of parameter names to be swept.
+        sweep_values (list): A list of values for the swept parameters.
+        export_parameters_to_csv (bool): If True, exports model parameters to a CSV file.
+        extend_export_from_params_in_csv (bool): If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
+        show_model_info (bool): If True, prints model information including parameters, materials, physics, and studies.
+        save_solved_model (bool): If True, saves a copy of the solved model.
+        export_solution_data (bool): If True, exports solution data from the model.
+        save_small_model_version (bool): If True, saves a smaller version of the model without solutions but with settings, parameters, and configured exports.
+        new_log_file (bool): If True, initializes a new log file for this simulation run.
+
+    Returns:
+        None        
+    """
+    if tl.LOG_PATH is None or new_log_file:
+            last_log_path = tl.LOG_PATH
+            tl.initialize_time_log(output_folder / "sweep_log.txt")
+
+    # Import the model from the specified input folder
+    client, model_list = import_models(
+            client=client, 
+            MODELNAME_LIST=[filename], 
+            printFeedback=True,
+            avoid_reimporting=True,
+            path_to_models=str(input_folder),
+            )
+
+    # this function only uses one model
+    model = model_list[0]
+    modelname = client.names()[0]
+
+    # Time logging
+    message = f"Working on sweeping the model {modelname}."
+    tl.log_message(message)
+    print(message)
+
+    # export model parameters to CSV
+    if export_parameters_to_csv:
+        output_csv_path = output_folder / f"{modelname}_parameters.csv"
+        save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
+
+        # Time logging
+        tl.log_message(f"Exported {modelname} parameters to CSV")
+
+    if extend_export_from_params_in_csv:
+        # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
+        try:
+            df_parameters = pd.read_csv(output_csv_path)
+            export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
+            export_params.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
+        except Exception as e:
+            message = f"Error reading parameters from CSV: {e}"
+            tl.log_message(message)
+            print(message)
+            message = f"Continuing with existing export_params and export_description lists."
+            tl.log_message(message)
+            print(message)
+
+    if show_model_info:
+        # print parameters, materials, physics, and studies of the model
+        _ = print_model_info(model)
+
+        # Display the model tree structure
+        mph.tree(model)
+
+    if True:
+        parameter_sweep(
+                model = model,
+                client = client,
+                studyname = "Study 1",
+                parameternames = sweep_parameter,
+                parametervalues = sweep_values,
+                expressions = export_params,
+                export_path = str(output_folder/"Sweep_Data"),
+                dataset_identifier = "Study 1/Solution 1",
+                markwithParameters = sweep_parameter,
+                saveSolutions = save_solved_model,
+            )
+
+    if export_solution_data:
+        # export data from the model
+        override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
+        model.export("PyExport", output_folder / f"{modelname}_exported_data.txt")
+
+        # Time logging
+        tl.log_message(f"Exported {modelname} solution data.")
+
+    if save_small_model_version:
+        # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
+        save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+
+    # explicitly clear all models from server
+    client.clear() 
+
+    # time logging
+    message = f"Cleared {modelname} from client."
+    tl.log_message(message)
+    print(message)
+
+    if last_log_path is None:
+        tl.LOG_PATH = None
+    elif new_log_file:
+        tl.initialize_time_log(last_log_path)  # restore the previous log file path if it was changed
+    
+
+##############################################################################
+##############################################################################
+
