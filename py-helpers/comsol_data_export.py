@@ -1,5 +1,5 @@
 # Author: Niko Bleidistel
-# last change: 2026-08-02
+# last change: 2026-08-04
 
 ##############################################################################
 # import packages
@@ -7,10 +7,15 @@
 
 import mph                              # api for comsol multiphysics
 
+import numpy as np                     # numpy for numerical operations
+
 import pandas as pd                     # pandas for easy DataAnalysis
 from IPython.display import display     # for displaying DataFrames
 
 from os import makedirs                 # for creating directories
+from os import devnull                  # for redirecting stdout to null device
+import contextlib                       # for redirecting stdout
+
 import pathlib                          # for handling file paths
 import csv                              # for handling csv files
 
@@ -90,7 +95,6 @@ def import_models(MODELNAME_LIST: list[str],
     # load all Models in MODELNAME_LIST
     model_list=[]
     for path in model_paths:
-        # print(f'Loading model from path: {path}')
         model = client.load(path)
         model_list.append(model)
         tl.log_message(f'Model "{model.name()}" loaded from path: {path}')
@@ -837,11 +841,53 @@ def save_as_copy(model: mph.Model,
 ##############################################################################
 ##############################################################################
 
+def find_COMSOL_dataset_tag(model: mph.Model, dataset_identifier: str, printFeedback: bool = False) -> str | None:
+    """
+    Finds the internal COMSOL dataset tag based on the provided dataset identifier.
+    
+    Args:
+        model (mph.Model):                      An instance of mph.Model for which the dataset tag should be found.
+        dataset_identifier (str):               The identifier of the dataset to be used in the export node.
+        printFeedback (bool, optional):         If True, prints feedback about the found dataset tag. Default is False.
+
+    Returns:
+        str | None: The internal COMSOL dataset tag if found, otherwise None.
+    """
+    if not isinstance(model, mph.Model):
+        raise TypeError("The argument 'model' needs to be an instance of 'mph.Model'.")
+    if not isinstance(dataset_identifier, str):
+        raise TypeError("The argument 'dataset_identifier' needs to be a string.")
+
+    java_model = model.java
+    dataset_registry = java_model.result().dataset()
+    dataset_tags = list(dataset_registry.tags())
+    actual_dataset_tag = None
+    
+    # test if the dataset identifier is directly a dataset tag
+    if dataset_identifier in dataset_tags:
+        actual_dataset_tag = dataset_identifier
+    else:
+        # search for the dataset tag based on the dataset label containing the provided dataset identifier
+        for d_tag in dataset_tags:
+            lbl = java_model.result().dataset(d_tag).label()
+            if dataset_identifier == lbl or f"({dataset_identifier})" in lbl:
+                actual_dataset_tag = d_tag
+                if printFeedback:
+                    print(f"Dataset: '{dataset_identifier}' has been identified as COMSOL-Tag '{d_tag}'.")
+                    tl.log_message(f"Dataset: '{dataset_identifier}' has been identified as internal COMSOL-Tag '{d_tag}'.")
+                break
+
+    if actual_dataset_tag is None and printFeedback:
+                print(f"Warning: Dataset '{dataset_identifier}' not found.")
+
+    return actual_dataset_tag
+
 def override_export_variables(model: mph.Model, 
                               export_node_name: str,
                               expressions: list,
                               dataset_identifier: str,
                               descriptions: list | None = None,
+                              printFeedback: bool = False
                               ):
     """
     Sets or overrides the variables and dataset of the named export node. When the export node does not exist, it will be created. 
@@ -884,29 +930,15 @@ def override_export_variables(model: mph.Model,
         export_registry.create(new_tag, "Data")
         target_node = java_model.result().export(new_tag)
         target_node.label(export_node_name)
-    
-    # find dateset tag based on the provided dataset identifier and set it in the export node
-    # get all dataset tags and labels
-    dataset_registry = java_model.result().dataset()
-    dataset_tags = list(dataset_registry.tags())
-    actual_dataset_tag = None
-    
-    # test if the dataset identifier is directly a dataset tag
-    if dataset_identifier in dataset_tags:
-        actual_dataset_tag = dataset_identifier
-    else:
-        # search for the dataset tag based on the dataset label containing the provided dataset identifier
-        for d_tag in dataset_tags:
-            lbl = java_model.result().dataset(d_tag).label()
-            if dataset_identifier == lbl or f"({dataset_identifier})" in lbl:
-                actual_dataset_tag = d_tag
-                print(f"Dataset: '{dataset_identifier}' has been identified as COMSOL-Tag '{d_tag}'.")
-                break
-    
+
+    # find the internal dataset tag based on the provided dataset identifier
+    actual_dataset_tag = find_COMSOL_dataset_tag(model=model, dataset_identifier=dataset_identifier, printFeedback=printFeedback)
+
     if actual_dataset_tag is not None:
         target_node.set("data", actual_dataset_tag)
     else:
-        print(f"Warning: Dataset '{dataset_identifier}' not found. Using default setting.")
+        if printFeedback:
+            print(f"Warning: Dataset '{dataset_identifier}' not found. Using default setting.")
 
     # (over-)write expressions and descriptions into the export node
     if descriptions is None:
@@ -914,9 +946,239 @@ def override_export_variables(model: mph.Model,
     target_node.set("expr", expressions)
     target_node.set("descr", descriptions)
 
-    message = f"Variables successfully added to export '{export_node_name}' of model '{model.name()}'."
+    message = f"Variables successfully set to export '{export_node_name}' of model '{model.name()}'."
     tl.log_message(message)
-    print(message)
+    if printFeedback:
+        print(message)
+    
+    return str(target_node.label())  # return the label of the export node for reference
+
+##############################################################################
+##############################################################################
+
+def create_comsol_cut_plane(model: mph.Model, input_tag: str, output_tag: str, plane_direction: str, coordinate: float, distances=None, label=None):
+    """
+    Creates a Cut Plane dataset in the COMSOL model using the native Java API.
+    Supports both COMSOL formula strings and Python/NumPy arrays for distances.
+
+    Args:
+        model (mph.Model):        The COMSOL model object loaded via Mph
+        input_tag (str):          Internal tag of the source dataset (e.g., "sol1")
+        output_tag (str):         Internal tag of the output dataset (e.g., "cpl1")
+        plane_direction (str):    Direction of the cut plane ("xy", "yz" or "xz")
+        coordinate (float):       Coordinate value for the cut plane (can be a number or a COMSOL formula string)
+        distances (optional):     String formula, list, tuple, or NumPy array for additional parallel planes
+        label (optional):         Visible GUI label text for the COMSOL model tree
+    """
+    if plane_direction not in ["xy", "yz", "xz"]:
+        raise ValueError("Invalid plane_direction. Must be one of 'xy', 'yz', or 'xz'.")
+
+    # 1. Generate a unique internal tag for the new dataset if the provided output_tag already exists
+    existing_tags = [str(t) for t in model.java.result().dataset().tags()]
+    if output_tag in existing_tags:
+        tl.log_message(f"Warning: The provided output_tag '{output_tag}' already exists. A new unique tag will be generated.")
+        counter = 1
+        output_tag = f"cpl{counter}"
+        while output_tag in existing_tags:
+            counter += 1
+            output_tag = f"cpl{counter}"
+        
+    # 2. Create the Cut Plane dataset using the internal tag
+    cut_plane = model.java.result().dataset().create(output_tag, "CutPlane")
+    
+    # 3. Set the visible GUI label if provided, otherwise fallback to default
+    if label:
+        cut_plane.label(str(label))
+    else:
+        cut_plane.label(f"Cut Plane {counter}")
+    
+    # 4. Assign the source dataset (requires the internal tag, e.g., "sol1")
+    cut_plane.set("data", input_tag)
+    
+    # 5. Set the plane type to "Quick"
+    cut_plane.set("planetype", "quick")
+    
+    # 6. Format and set the plane orientation
+    cut_plane.set("quickplane", plane_direction)
+    
+    # 7. Set the coordinate depending on the chosen plane direction
+    if plane_direction == "yz":
+        cut_plane.set("quickx", str(coordinate))
+    elif plane_direction == "xz":
+        cut_plane.set("quicky", str(coordinate))
+    elif plane_direction == "xy":
+        cut_plane.set("quickz", str(coordinate))
+        
+    # 8. Configure additional parallel planes (distances) if provided
+    if distances is not None:
+        cut_plane.set("quickextra", True)
+        
+        # Check if distances is an iterable structure (list, tuple, numpy array) but not a string
+        if hasattr(distances, '__iter__') and not isinstance(distances, (str, bytes)):
+            # Convert Python/NumPy array to COMSOL space-separated string format "0.1 0.2 0.3"
+            distances_str = " ".join(map(str, distances))
+        else:
+            # Keep it as a string (e.g., if a COMSOL formula like "range(...)" is passed)
+            distances_str = str(distances)
+            
+        cut_plane.set("quickdistance", distances_str)
+    else:
+        cut_plane.set("quickextra", False)
+        
+    return output_tag
+
+
+##############################################################################
+
+def create_comsol_cut_line_3d(
+        model: mph.Model,
+        input_tag: str,
+        output_tag: str,
+        point1: tuple,
+        point2: tuple,
+        bounded: bool=True,
+        distances: None | list | tuple | np.ndarray | str = None,
+        orth_vector: list[int] | None = None,
+        label=None,
+        enforce_unique_tag: bool = False
+        ):
+    """
+    Creates a Cut Line 3D dataset in the COMSOL model using the native Java API.
+    Supports both COMSOL formula strings and Python/NumPy arrays for distances.
+
+    Args:
+        model (mph.Model):        The COMSOL model object loaded via Mph
+        input_tag (str):          Internal tag of the source dataset (e.g., "sol1")
+        output_tag (str):         Internal tag of the output dataset (e.g., "cln1")
+        point1 (tuple):           Coordinates of the first point (x1, y1, z1)
+        point2 (tuple):           Coordinates of the second point (x2, y2, z2)
+        bounded (bool):           Whether the cut line is bounded by the two points (True) or extends infinitely (False)
+        distances (optional):     String formula, list, tuple, or NumPy array for additional parallel lines
+        orth_vector (optional):   Orthogonal vector for the additional lines (like [0, 0, 1])
+        label (optional):         Visible GUI label text for the COMSOL model tree
+
+    Returns:
+        str: The internal tag of the created Cut Line 3D dataset. 
+    """
+    # 1. Generate a unique internal tag for the new dataset if the provided output_tag already exists
+    existing_tags = [str(t) for t in model.java.result().dataset().tags()]
+    if output_tag in existing_tags:
+        if enforce_unique_tag:
+            counter = 1
+            output_tag = f"cpl{counter}"
+            while output_tag in existing_tags:
+                counter += 1
+                output_tag = f"cpl{counter}"
+        else:
+            model.java.result().dataset().remove(output_tag)
+        
+    # 2. Create the Cut Line 3D dataset
+    cut_line = model.java.result().dataset().create(output_tag, "CutLine3D")
+    
+    # 3. Set the visible GUI label
+    if label:
+        cut_line.label(str(label))
+    else:
+        cut_line.label(f"Cut Line 3D {output_tag}")
+        
+    # 4. Assign the source dataset
+    cut_line.set("data", input_tag)
+    
+    # 5. Set Line entry method explicitly to "Two points"
+    cut_line.set("method", "twopoint")
+    
+    # 6. Set coordinates for Point 1 and Point 2 via 'genpoints' matrix rows
+    # Index format: setIndex("genpoints", value, point_index, coordinate_index)
+    for i in range(3):
+        cut_line.setIndex("genpoints", str(point1[i]), 0, i)
+        cut_line.setIndex("genpoints", str(point2[i]), 1, i)
+    
+    # 7. Set "Bounded by points" option
+    cut_line.set("bounded", bounded)
+    
+    # 8. Configure additional parallel lines using verified 'genpara...' properties
+    if distances is not None:
+        cut_line.set("genparaactive", True)
+        
+        # Convert Python list, tuple, or NumPy array to COMSOL space-separated string
+        if hasattr(distances, '__iter__') and not isinstance(distances, (str, bytes)):
+            distances_str = " ".join(map(str, distances))
+        else:
+            distances_str = str(distances)
+            
+        cut_line.set("genparadist", distances_str)
+        
+        # Official property name for the normal plane span vector is 'orthvec'
+        vec = orth_vector if orth_vector else [0, 0, 1]
+        vec_str_array = [str(x) for x in vec]
+        cut_line.set("orthvec", vec_str_array)
+    else:
+        cut_line.set("genparaactive", "off")
+        
+    return output_tag
+
+
+##############################################################################
+##############################################################################
+
+def round_to_6_sig_digits(series: pd.Series) -> pd.Series:
+    """
+    Rounds a numeric pandas Series to exactly 6 significant digits.
+    """
+    valid_series = series.dropna()
+    if valid_series.empty:
+        return series
+    abs_series = valid_series.abs()
+    # If all non-NaN values are 0, return a series filled with 0.0
+    if (abs_series == 0).all():
+        return pd.Series(0.0, index=series.index)
+    # Handle zeros carefully to avoid log10 infinity errors
+    with np.errstate(divide="ignore"):
+        exponent = np.where(abs_series > 0, np.floor(np.log10(abs_series)), 0)
+    # 5 minus the exponent gives exactly 6 significant digits
+    decimals = 5 - exponent.astype(int)
+    # Compute rounded values while strictly preserving the DataFrame indices
+    rounded_list = [
+        round(val, max(0, dec)) if pd.notna(val) else np.nan
+        for val, dec in zip(valid_series, decimals)
+    ]
+    return pd.Series(rounded_list, index=valid_series.index)
+
+
+def find_constant_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Identifies numeric columns in a DataFrame that contain only a single constant
+    value within the first 25 rows, ignoring NaN values and checking up to 6
+    significant digits. Non-numeric columns are skipped.
+
+    Returns:
+        pd.DataFrame: A DataFrame with two columns: "Constants" and "Value",
+                      containing the names of constant columns and their
+                      corresponding constant values.
+    """
+    # Look only at the first 25 rows
+    df_sample = df.head(25)
+    constants_dict = {}
+    for col in df_sample.columns:
+        series = df_sample[col]
+        # Skip non-numeric columns safely (handles StringDtype, object, datetime, etc.)
+        if not pd.api.types.is_numeric_dtype(series.dtype):
+            continue
+        # Extract the series and explicitly drop NaN values
+        valid_series = series.dropna()
+        # Skip columns that are completely empty or contain only NaNs
+        if valid_series.empty:
+            continue
+        # Round the remaining non-NaN values to 6 significant digits
+        rounded_series = round_to_6_sig_digits(valid_series)
+        # Check if all remaining valid values are identical after rounding
+        if rounded_series.dropna().nunique() == 1:
+            # Safely extract the first element as the scalar representation
+            constants_dict[col] = rounded_series.dropna().iloc[0]
+    # Construct the final resulting DataFrame
+    return pd.DataFrame(
+        list(constants_dict.items()), columns=["Constants", "Value"]
+    )
 
 ##############################################################################
 ##############################################################################
@@ -1073,14 +1335,12 @@ def parameter_sweep(model: mph.Model,
         message = f"Exporting results for iteration {iteration+1}..."
         tl.log_message(message)
         print(message)
-        EXPORT_NODE_NAME="PySweepExport"
-        
         
         filename = f"{MODELNAME}_iteration_{iteration}"
         path = folder_path / filename
         
-        override_export_variables(model, export_node_name=EXPORT_NODE_NAME, expressions=expressions , dataset_identifier=dataset_identifier)
-        model.export(EXPORT_NODE_NAME, str(path) + ".txt")
+        export_node_label = override_export_variables(model, export_node_name="PySweepExport", expressions=expressions , dataset_identifier=dataset_identifier)
+        model.export(export_node_label, str(path) + ".txt")
 
         if saveSolutions:
             message = f"Saving model solution for iteration {iteration+1} to {path}..."
@@ -1102,6 +1362,22 @@ def parameter_sweep(model: mph.Model,
 ##############################################################################
 ##############################################################################
 
+# creat manager to suppress prints based on a boolean flag
+@contextlib.contextmanager
+def suppress_prints(should_suppress: bool):
+    if should_suppress:
+        # suppress the prints by redirecting stdout to os.devnull
+        with open(devnull, "w") as fnull:
+            with contextlib.redirect_stdout(fnull):
+                yield
+    else:
+        # allow prints to go through
+        yield
+
+
+##############################################################################
+##############################################################################
+
 def simulate_model(
         # path settings
         filename: str,
@@ -1113,13 +1389,29 @@ def simulate_model(
         export_params: list,
         export_descriptions: list,
 
+        # COMSOL internal interpolation
+        Depth_point1: tuple|None = None,
+        Depth_point2: tuple|None = None,
+
+        Homogeneity_point1: tuple|None = None,
+        Homogeneity_point2: tuple|None = None,
+        Homogeneity_distances: None | list | tuple | np.ndarray | str  = None,
+        Homogeneity_orth_vector: list[int] | None = None,
+
+        Longitudinal_point1: tuple|None = None,
+        Longitudinal_point2: tuple|None = None,
+        Longitudinal_distances: None | list | tuple | np.ndarray | str = None,
+        Longitudinal_orth_vector: list[int] | None = None,
+
         # boolean flags    
         export_parameters_to_csv: bool = True,
+        evaluate_parameter_expressions: bool = True,
         extend_export_from_params_in_csv: bool = True,
         show_model_info: bool = False,
         solve_model: bool = True,
         save_solved_model: bool = True,
-        export_solution_data: bool = True,
+        export_all_solution_data: bool = False,
+        export_line_solution_data: bool = True,
         save_small_model_version: bool = True,
         new_log_file: bool = False,
     ):
@@ -1127,100 +1419,272 @@ def simulate_model(
     Simulates a COMSOL Multiphysics model by importing it, optionally exporting parameters to CSV, solving the model, exporting solution data, and saving different versions of the model.
     
     Args:
-        filename (str): The name of the COMSOL model file to be imported.
-        input_folder (pathlib.Path): The folder path where the input model file is located.
-        output_folder (pathlib.Path): The folder path where output files will be saved.
-        client (mph.client.Client): An instance of the COMSOL client for model operations.
-        export_params (list): A list of parameters to be exported from the model.
-        export_descriptions (list): A list of descriptions corresponding to the export parameters. If you dont want to use descriptions, you can provide an empty list.
-        export_parameters_to_csv (bool): If True, exports model parameters to a CSV file.
-        extend_export_from_params_in_csv (bool): If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
-        show_model_info (bool): If True, prints model information including parameters, materials, physics, and studies.
-        solve_model (bool): If True, solves the model. If model is already solved, this can be set to False to save time.
-        save_solved_model (bool): If True, saves a copy of the solved model.
-        export_solution_data (bool): If True, exports solution data from the model.
-        save_small_model_version (bool): If True, saves a smaller version of the model without solutions but with settings, parameters, and configured exports.
-        new_log_file (bool): If True, initializes a new log file for this simulation run.
+        filename (str):                             The name of the COMSOL model file to be imported.
+        input_folder (pathlib.Path):                The folder path where the input model file is located.
+        output_folder (pathlib.Path):               The folder path where output files will be saved.
+        client (mph.client.Client):                 An instance of the COMSOL client for model operations.
+        export_params (list):                       A list of parameters to be exported from the model.
+        export_descriptions (list):                 A list of descriptions corresponding to the export parameters. If you dont want to use descriptions, you can provide an empty list.
+        Depth_point1 (tuple|None):                  The first point for the depth cut line. If None, depth cut line export will be skipped.
+        Depth_point2 (tuple|None):                  The second point for the depth cut line. If None, depth cut line export will be skipped.
+        Homogeneity_point1 (tuple|None):            The first point for the homogeneity cut line. If None, homogeneity cut line export will be skipped.
+        Homogeneity_point2 (tuple|None):            The second point for the homogeneity cut line. If None, homogeneity cut line export will be skipped.
+        Homogeneity_distances (None | list | tuple | np.ndarray | str):  Distances for additional parallel lines for the homogeneity cut line. If None, no additional lines will be created.
+        Homogeneity_orth_vector (list[int]|None):   Orthogonal vector for the additional lines for the homogeneity cut line. If None, defaults to [0, 0, 1].
+        Longitudinal_point1 (tuple|None):           The first point for the longitudinal cut line. If None, longitudinal cut line export will be skipped.
+        Longitudinal_point2 (tuple|None):           The second point for the longitudinal cut line. If None, longitudinal cut line export will be skipped.
+        Longitudinal_distances (None | list | tuple | np.ndarray | str):  Distances for additional parallel lines for the longitudinal cut line. If None, no additional lines will be created.
+        Longitudinal_orth_vector (list[int]|None):  Orthogonal vector for the additional lines for the longitudinal cut line. If None, defaults to [0, 0, 1].
+        export_parameters_to_csv (bool):            If True, exports model parameters to a CSV file.
+        evaluate_parameter_expressions (bool):      If True, evaluates parameter expressions and saves them to a CSV file.
+        extend_export_from_params_in_csv (bool):    If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
+        show_model_info (bool):                     If True, prints model information including parameters, materials, physics, and studies.
+        solve_model (bool):                         If True, solves the model. If model is already solved, this can be set to False to save time.
+        save_solved_model (bool):                   If True, saves a copy of the solved model.
+        export_all_solution_data (bool):            If True, exports all the solution data from the model.
+        export_line_solution_data (bool):           If True, exports solution data along specified cut lines (depth, homogeneity, longitudinal).
+        save_small_model_version (bool):            If True, saves a smaller version of the model without solutions but with settings, parameters, and configured exports.
+        new_log_file (bool):                        If True, initializes a new log file for this simulation run.
 
     Returns:
         None
     """
+    # create new log file if requested, otherwise use the existing log file
+    last_log_path = tl.LOG_PATH
+    last_start_time = tl.START_TIME
+    last_last_time = tl.LAST_TIME
     if tl.LOG_PATH is None or new_log_file:
-        last_log_path = tl.LOG_PATH
-        tl.initialize_time_log(output_folder / "simulation_log.txt")
+        if tl.LOG_PATH is not None:
+            tl.log_message(f"Loging simulation of model '{filename}' in a separate log file as per user request.")
+        tl.initialize_time_log(output_folder / f"{filename}_simulation_log.csv", startmessage=f"Created new log file for simulation of model '{filename}'.")
 
-    # Import the model from the specified input folder
-    client, model_list = import_models(
-            client=client, 
-            MODELNAME_LIST=[filename], 
-            printFeedback=True,
-            avoid_reimporting=True,
-            path_to_models=str(input_folder),
-            )
+    try:
+        # Import the model from the specified input folder
+        client, model_list = import_models(
+                client=client, 
+                MODELNAME_LIST=[filename], 
+                printFeedback=False,
+                avoid_reimporting=True,
+                path_to_models=str(input_folder),
+                )
 
-    # this function only uses one model
-    model = model_list[0]
-    modelname = client.names()[0]
+        # this function only uses one model
+        model = model_list[0]
+        modelname = client.names()[0]
 
-    # Time logging
-    tl.log_message(f"Working with model {modelname}.")
-
-    # export model parameters to CSV
-    if export_parameters_to_csv:
-        output_csv_path = output_folder / f"{modelname}_parameters.csv"
-        save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
-
-    if extend_export_from_params_in_csv:
-        # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
-        df_parameters = pd.read_csv(output_csv_path)
-        export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
-        export_params.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
-
-    if show_model_info:
-        # print parameters, materials, physics, and studies of the model
-        _ = print_model_info(model)
-
-        # Display the model tree structure
-        mph.tree(model)
-
-    if solve_model:
         # Time logging
-        tl.log_message(f"Solving {modelname}...")
+        tl.log_message(f"Working with model {modelname}.")
 
-        # Solve the model
-        model.solve()
+        # export model parameters to CSV
+        output_csv_path = output_folder / f"{modelname}_parameters.csv"
+        if export_parameters_to_csv:
+            save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
 
-        # Time logging        
-        tl.log_message(f"Finished solving {modelname}.")
+        if evaluate_parameter_expressions:
+            # evaluate the parameter expressions and save them to a CSV file
+            df_parameters = pd.read_csv(output_csv_path)
+            terminal_data = []
+            for param in df_parameters["name"].tolist():
+                try:
+                    evaluated_value = model.evaluate(f"root.{param}")
+                    df_parameters.loc[df_parameters["name"] == param, "evaluated_value"] = evaluated_value
+                except Exception as e:
+                    tl.log_message(f"Warning: Could not evaluate parameter '{param}': {e}")
+                    df_parameters.loc[df_parameters["name"] == param, "evaluated_value"] = None
+
+
+                # check if the parameter name matches the pattern "V01", "V02", ..., "V99" or "V_<suffix>" or "I_<suffix>" and evaluate the corresponding "ec.I0_GXX" and "ec.V0_GXX" expressions
+                Vnum_match = re.match(r"^V(\d{2})$", param) # matches V01, V02, ..., V99
+                V_match = re.match(r"^V_(.*)$", param)
+                I_match = re.match(r"^I_(.*)$", param) 
+                if Vnum_match:
+                    num_str = Vnum_match.group(1) # extract the two-digit number
+                    try:
+                        I_str = f"ec.I0_G{num_str}"
+                        I_value = model.evaluate(f"ec.I0_G{num_str}")
+                        terminal_data.append({"name": I_str, "evaluated_value": I_value})
+
+                        V_str = f"ec.V0_G{num_str}"
+                        V_value = model.evaluate(f"ec.V0_G{num_str}")
+                        terminal_data.append({"name": V_str, "evaluated_value": V_value})
+                    except Exception as e:
+                        pass
+
+                if I_match or V_match:
+                    suffix = I_match.group(1) if I_match else V_match.group(1) if V_match else None
+                    try:
+                        I_str = f"ec.I0_G{num_str}"
+                        I_value = model.evaluate(f"ec.I0_{suffix}")
+                        terminal_data.append({"name": I_str, "evaluated_value": I_value})
+
+                        V_str = f"ec.V0_G{num_str}"
+                        V_value = model.evaluate(f"ec.V0_{suffix}")
+                        terminal_data.append({"name": V_str, "evaluated_value": V_value})
+                    except Exception as e:
+                        pass
+
+            # save the evaluated parameters to the CSV file
+            df_parameters.to_csv(output_csv_path, index=False)
+
+            # save the evaluated terminal data to a separate CSV file
+            df_terminals = pd.DataFrame(terminal_data)
+            df_terminals.to_csv(output_folder / f"{modelname}_terminals.csv", index=False)
+            
+
+
+
+        if extend_export_from_params_in_csv:
+            # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
+            df_parameters = pd.read_csv(output_csv_path)
+            export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
+            export_descriptions.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
+
+        if show_model_info:
+            # print parameters, materials, physics, and studies of the model
+            _ = print_model_info(model)
+
+            # Display the model tree structure
+            mph.tree(model)
+
+        if solve_model:
+            # Time logging
+            tl.log_message(f"Solving {modelname}...")
+
+            # Solve the model
+            model.solve()
+
+            # Time logging        
+            tl.log_message(f"Finished solving {modelname}.")
+        else:
+            tl.log_message(f"Skipping solving {modelname} as per user request.")
 
         # save the solved model
         if save_solved_model:
             save_as_copy(model, client, str(output_folder / f"{modelname}_solved.mph"), smallerFilesize=False)
-    else:
-        tl.log_message(f"Skipping solving {modelname} as per user request.")
 
-    if export_solution_data:
-        # export data from the model
-        override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
-        model.export("PyExport", output_folder / f"{modelname}_exported_data.txt")
+        if export_all_solution_data:
+            # export data from the model
+            export_node_label = override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
+            model.export(export_node_label, output_folder / f"{modelname}_exported_data.txt")
 
-        # Time logging
-        tl.log_message(f"Exported {modelname} solution data")
+            # Time logging
+            tl.log_message(f"Exported all solution data of {modelname}.")
 
-    if save_small_model_version:
-        # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
-        save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+        if export_line_solution_data:
+            all_solution = find_COMSOL_dataset_tag(model=model, dataset_identifier= "Study 1/Solution 1", printFeedback = False)
 
-    # explicitly clear all models from server
-    client.clear() 
+            if all_solution is None:
+                all_solution = "sol1"
+                tl.log_message(f"Warning: Dataset 'Study 1/Solution 1' not found. Using default dataset tag '{all_solution}' for line cut export.")
 
-    # time logging
-    tl.log_message(f"Cleared {modelname} from client.")
+            if Depth_point1 is not None and Depth_point2 is not None:
+                cut_line_tag = create_comsol_cut_line_3d(
+                                    model = model,
+                                    input_tag = all_solution,
+                                    output_tag="Pycln1",
+                                    point1 = Depth_point1,
+                                    point2 = Depth_point2,
+                                    bounded = True,
+                                    distances=None,
+                                    orth_vector=None,
+                                    label="Cut Line PyDepth"
+                                    )
+                
+                export_node_label = override_export_variables(
+                                        model=model, 
+                                        export_node_name = "PyDepthExport",
+                                        expressions  = export_params,
+                                        dataset_identifier = cut_line_tag,
+                                        descriptions = export_descriptions
+                                        )
+                model.export(export_node_label, output_folder / f"{modelname}_depth_exported_data.txt")
+                
+                # Time logging
+                tl.log_message(f"Exported depth solution data of {modelname}.")
+
+            if Homogeneity_point1 is not None and Homogeneity_point2 is not None:
+                        cut_line_tag = create_comsol_cut_line_3d(
+                                            model = model,
+                                            input_tag = all_solution,
+                                            output_tag="Pycln2",
+                                            point1 = Homogeneity_point1,
+                                            point2 = Homogeneity_point2,
+                                            bounded = True,
+                                            distances = Homogeneity_distances,
+                                            orth_vector = Homogeneity_orth_vector,
+                                            label="Cut Line PyHomogeneity"
+                                            )
+                        
+                        export_node_label = override_export_variables(
+                                                model=model, 
+                                                export_node_name = "PyHomogeneityExport",
+                                                expressions  = export_params,
+                                                dataset_identifier = cut_line_tag,
+                                                descriptions = export_descriptions
+                                                )
+                        model.export(export_node_label, output_folder / f"{modelname}_homogeneity_exported_data.txt")
+                        
+                        # Time logging
+                        tl.log_message(f"Exported homogeneity solution data of {modelname}.")
+
+            if Longitudinal_point1 is not None and Longitudinal_point2 is not None:
+                                cut_line_tag = create_comsol_cut_line_3d(
+                                                    model = model,
+                                                    input_tag = all_solution,
+                                                    output_tag="Pycln3",
+                                                    point1 = Longitudinal_point1,
+                                                    point2 = Longitudinal_point2,
+                                                    bounded = True,
+                                                    distances = Longitudinal_distances,
+                                                    orth_vector = Longitudinal_orth_vector,
+                                                    label="Cut Line PyLongitudinal"
+                                                    )
+                                
+                                export_node_label = override_export_variables(
+                                                        model=model, 
+                                                        export_node_name = "PyLongitudinalExport",
+                                                        expressions  = export_params,
+                                                        dataset_identifier = cut_line_tag,
+                                                        descriptions = export_descriptions
+                                                        )
+                                model.export(export_node_label, output_folder / f"{modelname}_longitudinal_exported_data.txt")
+                                
+                                # Time logging
+                                tl.log_message(f"Exported longitudinal solution data of {modelname}.")
+
+        # save the solved model
+        if save_solved_model:
+            save_as_copy(model, client, str(output_folder / f"{modelname}_solved.mph"), smallerFilesize=False)
+
+        if save_small_model_version:
+            # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
+            save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+
+        # explicitly clear all models from server
+        client.clear() 
+
+        # time logging
+        tl.log_message(f"Cleared {modelname} from client.")
+
+        endmessage = f"Simulation of model '{filename}' completed."
+        tl.log_message(endmessage)
+    except Exception as e:
+        endmessage = f"ERROR occurred during simulation of model '{filename}'."
+        tl.log_message(endmessage)
+        print(endmessage)
+
+        with open(str(output_folder / "errormessage.txt"), "w", encoding="utf-8") as destination:
+            destination.write(f"ERROR occurred during simulation of model '{filename}':\n\n")
+            destination.write(str(e))
+
+        endmessage = f"Error message saved to {output_folder / 'errormessage.txt'}"
+        tl.log_message(endmessage)
+        print(endmessage)
 
     if last_log_path is None:
         tl.LOG_PATH = None
     elif new_log_file:
-        tl.initialize_time_log(last_log_path)  # restore the previous log file path if it was changed
+        tl.initialize_time_log(last_log_path, startmessage=endmessage, start_time=last_start_time, last_time=last_last_time)  # restore the previous log file path if it was changed
 
 ##############################################################################
 
@@ -1237,12 +1701,27 @@ def sweep_model(
         sweep_parameter: list,
         sweep_values: list,
 
+        # COMSOL internal interpolation
+        Depth_point1: tuple|None = None,
+        Depth_point2: tuple|None = None,
+
+        Homogeneity_point1: tuple|None = None,
+        Homogeneity_point2: tuple|None = None,
+        Homogeneity_distances: None | list | tuple | np.ndarray | str = None,
+        Homogeneity_orth_vector: list[int] | None = None,
+
+        Longitudinal_point1: tuple|None = None,
+        Longitudinal_point2: tuple|None = None,
+        Longitudinal_distances: None | list | tuple | np.ndarray | str = None,
+        Longitudinal_orth_vector: list[int] | None = None,
+
         # boolean flags    
         export_parameters_to_csv: bool = True,
         extend_export_from_params_in_csv: bool = True,
         show_model_info: bool = False,
         save_solved_model: bool = True,
-        export_solution_data: bool = True,
+        export_all_solution_data: bool = False,
+        export_line_solution_data: bool = True,
         save_small_model_version: bool = True,
         new_log_file: bool = False,
     ):
@@ -1258,106 +1737,220 @@ def sweep_model(
         export_descriptions (list): A list of descriptions corresponding to the export parameters. If you dont want to use descriptions, you can provide an empty list.
         sweep_parameter (list): A list of parameter names to be swept.
         sweep_values (list): A list of values for the swept parameters.
+        Depth_point1 (tuple|None): The first point for the depth cut line. If None, depth cut line export will be skipped.
+        Depth_point2 (tuple|None): The second point for the depth cut line. If None, depth cut line export will be skipped.
+        Homogeneity_point1 (tuple|None): The first point for the homogeneity cut line. If None, homogeneity cut line export will be skipped.
+        Homogeneity_point2 (tuple|None): The second point for the homogeneity cut line. If None, homogeneity cut line export will be skipped.
+        Homogeneity_distances (None | list | tuple | np.ndarray | str): Distances for additional parallel lines for the homogeneity cut line. If None, no additional lines will be created.
+        Homogeneity_orth_vector (list[int]|None): Orthogonal vector for the additional lines for the homogeneity cut line. If None, defaults to [0, 0, 1].
+        Longitudinal_point1 (tuple|None): The first point for the longitudinal cut line. If None, longitudinal cut line export will be skipped.
+        Longitudinal_point2 (tuple|None): The second point for the longitudinal cut line. If None, longitudinal cut line export will be skipped.
+        Longitudinal_distances (None | list | tuple | np.ndarray | str): Distances for additional parallel lines for the longitudinal cut line. If None, no additional lines will be created.
+        Longitudinal_orth_vector (list[int]|None): Orthogonal vector for the additional lines for the longitudinal cut line. If None, defaults to [0, 0, 1].
         export_parameters_to_csv (bool): If True, exports model parameters to a CSV file.
         extend_export_from_params_in_csv (bool): If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
         show_model_info (bool): If True, prints model information including parameters, materials, physics, and studies.
         save_solved_model (bool): If True, saves a copy of the solved model.
-        export_solution_data (bool): If True, exports solution data from the model.
+        export_all_solution_data (bool): If True, exports all solution data from the model.
+        export_line_solution_data (bool): If True, exports solution data along specified cut lines (depth, homogeneity, longitudinal).
         save_small_model_version (bool): If True, saves a smaller version of the model without solutions but with settings, parameters, and configured exports.
         new_log_file (bool): If True, initializes a new log file for this simulation run.
 
     Returns:
         None        
     """
+    # create new log file if requested, otherwise use the existing log file
+    last_log_path = tl.LOG_PATH
+    last_start_time = tl.START_TIME
+    last_last_time = tl.LAST_TIME
+
     if tl.LOG_PATH is None or new_log_file:
-            last_log_path = tl.LOG_PATH
-            tl.initialize_time_log(output_folder / "sweep_log.txt")
+        if tl.LOG_PATH is not None:
+            tl.log_message(f"Loging sweep of model '{filename}' in a separate log file as per user request.")
+        tl.initialize_time_log(output_folder / f"{filename}_sweep_log.csv", startmessage=f"Created new log file for sweep of model '{filename}'.")
 
-    # Import the model from the specified input folder
-    client, model_list = import_models(
-            client=client, 
-            MODELNAME_LIST=[filename], 
-            printFeedback=True,
-            avoid_reimporting=True,
-            path_to_models=str(input_folder),
-            )
+    try:
+        # Import the model from the specified input folder
+        client, model_list = import_models(
+                client=client, 
+                MODELNAME_LIST=[filename], 
+                printFeedback=False,
+                avoid_reimporting=True,
+                path_to_models=str(input_folder),
+                )
 
-    # this function only uses one model
-    model = model_list[0]
-    modelname = client.names()[0]
-
-    # Time logging
-    message = f"Working on sweeping the model {modelname}."
-    tl.log_message(message)
-    print(message)
-
-    # export model parameters to CSV
-    if export_parameters_to_csv:
-        output_csv_path = output_folder / f"{modelname}_parameters.csv"
-        save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
+        # this function only uses one model
+        model = model_list[0]
+        modelname = client.names()[0]
 
         # Time logging
-        tl.log_message(f"Exported {modelname} parameters to CSV")
+        message = f"Working on sweeping the model {modelname}."
+        tl.log_message(message)
+        print(message)
 
-    if extend_export_from_params_in_csv:
-        # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
-        try:
-            df_parameters = pd.read_csv(output_csv_path)
-            export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
-            export_params.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
-        except Exception as e:
-            message = f"Error reading parameters from CSV: {e}"
-            tl.log_message(message)
-            print(message)
-            message = f"Continuing with existing export_params and export_description lists."
-            tl.log_message(message)
-            print(message)
+        # export model parameters to CSV
+        if export_parameters_to_csv:
+            output_csv_path = output_folder / f"{modelname}_parameters.csv"
+            save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
 
-    if show_model_info:
-        # print parameters, materials, physics, and studies of the model
-        _ = print_model_info(model)
+            # Time logging
+            tl.log_message(f"Exported {modelname} parameters to CSV")
 
-        # Display the model tree structure
-        mph.tree(model)
+        if extend_export_from_params_in_csv:
+            # extend the EXPORT_PARAMS and EXPORT_DESCRIPTION lists with the parameters from the CSV
+            try:
+                df_parameters = pd.read_csv(output_csv_path)
+                export_params.extend([f"root.{param}" for param in df_parameters["name"].tolist()])
+                export_params.extend([f"{desc}" for desc in df_parameters["description"].tolist()])
+            except Exception as e:
+                message = f"Error reading parameters from CSV: {e}"
+                tl.log_message(message)
+                print(message)
+                message = f"Continuing with existing export_params and export_description lists."
+                tl.log_message(message)
+                print(message)
 
-    if True:
-        parameter_sweep(
-                model = model,
-                client = client,
-                studyname = "Study 1",
-                parameternames = sweep_parameter,
-                parametervalues = sweep_values,
-                expressions = export_params,
-                export_path = str(output_folder/"Sweep_Data"),
-                dataset_identifier = "Study 1/Solution 1",
-                markwithParameters = sweep_parameter,
-                saveSolutions = save_solved_model,
-            )
+        if show_model_info:
+            # print parameters, materials, physics, and studies of the model
+            _ = print_model_info(model)
 
-    if export_solution_data:
-        # export data from the model
-        override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
-        model.export("PyExport", output_folder / f"{modelname}_exported_data.txt")
+            # Display the model tree structure
+            mph.tree(model)
 
-        # Time logging
-        tl.log_message(f"Exported {modelname} solution data.")
+        if True:
+            parameter_sweep(
+                    model = model,
+                    client = client,
+                    studyname = "Study 1",
+                    parameternames = sweep_parameter,
+                    parametervalues = sweep_values,
+                    expressions = export_params,
+                    export_path = str(output_folder/"Sweep_Data"),
+                    dataset_identifier = "Study 1/Solution 1",
+                    markwithParameters = sweep_parameter,
+                    saveSolutions = save_solved_model,
+                )
 
-    if save_small_model_version:
-        # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
-        save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+        if export_all_solution_data:
+            # export data from the model
+            export_node_label = override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
+            model.export(export_node_label, output_folder / f"{modelname}_exported_data.txt")
 
-    # explicitly clear all models from server
-    client.clear() 
+            # Time logging
+            tl.log_message(f"Exported all solution data of {modelname}.")
 
-    # time logging
-    message = f"Cleared {modelname} from client."
-    tl.log_message(message)
-    print(message)
+        if export_line_solution_data:
+            all_solution = find_COMSOL_dataset_tag(model=model, dataset_identifier= "Study 1/Solution 1", printFeedback = False)
+
+            if all_solution is None:
+                all_solution = "sol1"
+                tl.log_message(f"Warning: Dataset 'Study 1/Solution 1' not found. Using default dataset tag '{all_solution}' for line cut export.")
+
+            if Depth_point1 is not None and Depth_point2 is not None:
+                cut_line_tag = create_comsol_cut_line_3d(
+                                    model = model,
+                                    input_tag = all_solution,
+                                    output_tag="Pycln1",
+                                    point1 = Depth_point1,
+                                    point2 = Depth_point2,
+                                    bounded = True,
+                                    distances=None,
+                                    orth_vector=None,
+                                    label=None
+                                    )
+                
+                export_node_label = override_export_variables(
+                                        model=model, 
+                                        export_node_name = "PyDepthExport",
+                                        expressions  = export_params,
+                                        dataset_identifier = cut_line_tag,
+                                        descriptions = export_descriptions
+                                        )
+                model.export(export_node_label, output_folder / f"{modelname}_depth_exported_data.txt")
+                
+                # Time logging
+                tl.log_message(f"Exported depth solution data of {modelname}.")
+
+            if Homogeneity_point1 is not None and Homogeneity_point2 is not None:
+                        cut_line_tag = create_comsol_cut_line_3d(
+                                            model = model,
+                                            input_tag = all_solution,
+                                            output_tag="Pycln2",
+                                            point1 = Homogeneity_point1,
+                                            point2 = Homogeneity_point2,
+                                            bounded = True,
+                                            distances = Homogeneity_distances,
+                                            orth_vector = Homogeneity_orth_vector,
+                                            label=None
+                                            )
+                        
+                        export_node_label = override_export_variables(
+                                                model=model, 
+                                                export_node_name = "PyHomogeneityExport",
+                                                expressions  = export_params,
+                                                dataset_identifier = cut_line_tag,
+                                                descriptions = export_descriptions
+                                                )
+                        model.export(export_node_label, output_folder / f"{modelname}_homogeneity_exported_data.txt")
+                        
+                        # Time logging
+                        tl.log_message(f"Exported homogeneity solution data of {modelname}.")
+
+            if Longitudinal_point1 is not None and Longitudinal_point2 is not None:
+                                cut_line_tag = create_comsol_cut_line_3d(
+                                                    model = model,
+                                                    input_tag = all_solution,
+                                                    output_tag="Pycln3",
+                                                    point1 = Longitudinal_point1,
+                                                    point2 = Longitudinal_point2,
+                                                    bounded = True,
+                                                    distances = Longitudinal_distances,
+                                                    orth_vector = Longitudinal_orth_vector,
+                                                    label=None
+                                                    )
+                                
+                                export_node_label = override_export_variables(
+                                                        model=model, 
+                                                        export_node_name = "PyLongitudinalExport",
+                                                        expressions  = export_params,
+                                                        dataset_identifier = cut_line_tag,
+                                                        descriptions = export_descriptions
+                                                        )
+                                model.export(export_node_label, output_folder / f"{modelname}_longitudinal_exported_data.txt")
+                                
+                                # Time logging
+                                tl.log_message(f"Exported longitudinal solution data of {modelname}.")
+
+        if save_small_model_version:
+            # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
+            save_as_copy(model, client, str(output_folder / f"{modelname}_smallfile.mph"), smallerFilesize=True)
+
+        # explicitly clear all models from server
+        client.clear() 
+
+        # time logging
+        message = f"Cleared {modelname} from client."
+        tl.log_message(message)
+
+        endmessage = f"Sweep of model '{filename}' completed."
+        tl.log_message(endmessage)
+    except Exception as e:
+            endmessage = f"ERROR occurred during sweep of model '{filename}'."
+            tl.log_message(endmessage)
+            print(endmessage)
+    
+            with open(str(output_folder / "errormessage.txt"), "w", encoding="utf-8") as destination:
+                destination.write(f"ERROR occurred during sweep of model '{filename}':\n\n")
+                destination.write(str(e))
+    
+            endmessage = f"Error message saved to {output_folder / 'errormessage.txt'}"
+            tl.log_message(endmessage)
+            print(endmessage)
 
     if last_log_path is None:
         tl.LOG_PATH = None
     elif new_log_file:
-        tl.initialize_time_log(last_log_path)  # restore the previous log file path if it was changed
+        tl.initialize_time_log(last_log_path, startmessage=endmessage, start_time=last_start_time, last_time=last_last_time)  # restore the previous log file path if it was changed
     
 
 ##############################################################################

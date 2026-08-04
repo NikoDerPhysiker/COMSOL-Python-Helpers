@@ -25,7 +25,9 @@ LAST_TIME: float | None = None
 
 def initialize_time_log(
         log_path: Path,
-        startmessage: str = "Started running Python script"
+        startmessage: str = "Started running Python script",
+        start_time: float | None = None,
+        last_time: float | None = None
         ):
     """
     Initializes the time logging system.
@@ -85,8 +87,12 @@ def initialize_time_log(
     )
 
     # Reset and start the timers
-    START_TIME = time.perf_counter()
-    LAST_TIME = START_TIME
+    if start_time is None or last_time is None:
+        START_TIME = time.perf_counter()
+        LAST_TIME = START_TIME
+    else:
+        START_TIME = start_time
+        LAST_TIME = last_time
 
     # Log the initial entry and update the last logged time tracker
     LAST_TIME = log_time(startmessage, START_TIME, LAST_TIME)
