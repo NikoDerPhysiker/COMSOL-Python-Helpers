@@ -1,5 +1,5 @@
 # Author: Niko Bleidistel
-# last change: 2026-06-15
+# last change: 2026-08-05
 
 # Description:
 # This module provides functions for plotting data with error bars and optional fitting, 
@@ -14,12 +14,17 @@
 # Import necessary libraries and define type hints
 ##############################################################################
 
+import math
+
 import uncertainties as unc
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib.ticker as ticker
 
 # For type hints
-from typing import Any, cast
+from typing import Any, Literal, cast
+
+import re 
 
 import matplotlib.axes
 import matplotlib.figure
@@ -29,7 +34,103 @@ from typing import Union
 UncFloat = Union[Variable, AffineScalarFunc]
 
 ##############################################################################
+##############################################################################
+# helper function
+##############################################################################
+##############################################################################
+
+def get_SI_prefix(limits: tuple[float, float])-> tuple[str|None, int, int]:
+        """
+        Returns the SI prefix for a given numeric value.
+        
+        Args:
+            limits (tuple[float, float]): A tuple containing the minimum and maximum values.
+        
+        Returns:
+            tuple[str|None, int, int]: A tuple containing the SI prefix, the SI exponent, and the exponent difference to the magnitude of the input values.
+        """
+        # get the maximum absolute value from the limits
+        xmax = max(abs(x) for x in limits)
+
+        # get magnitude of the maximum value
+        x_base_exponent = math.floor(math.log10(xmax)) if xmax > 0 else 0
+        
+        # Round down to the nearest multiple of 3 for SI prefix
+        xsi_exponent = (x_base_exponent // 3) * 3 
+        exponent_diff = x_base_exponent - xsi_exponent
+
+        # Define the mapping of SI prefixes to their corresponding exponents
+        PREFIX_TO_EXPONENT = {
+            # Large values (positive exponents)
+            "Q": 30,   # Quetta
+            "R": 27,   # Ronna
+            "Y": 24,   # Yotta
+            "Z": 21,   # Zetta
+            "E": 18,   # Exa
+            "P": 15,   # Peta
+            "T": 12,   # Tera
+            "G": 9,    # Giga
+            "M": 6,    # Mega
+            "k": 3,    # Kilo
+            "h": 2,    # Hecto
+            "da": 1,   # Deca
+            
+            # Small values (negative exponents)
+            "d": -1,   # Deci
+            "c": -2,   # Centi
+            "m": -3,   # Milli
+            "u": -6,   # Micro (often written as µ)
+            "n": -9,   # Nano
+            "p": -12,  # Pico
+            "f": -15,  # Femto
+            "a": -18,  # Atto
+            "z": -21,  # Zepto
+            "y": -24,  # Yocto
+            "r": -27,  # Ronto
+            "q": -30,   # Quekto
+        }
+
+        # Returns the key, or None if the value doesn't exist
+        siprefix = next((k for k, v in PREFIX_TO_EXPONENT.items() if v == xsi_exponent), None)
+        return siprefix, xsi_exponent, exponent_diff
+
+def prefixes_notation(fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes, axis: Literal['x', 'y']):
+    """
+    Adjusts the axis labels of a matplotlib plot to use SI prefixes based on the data limits.
+
+    Args:
+        fig (matplotlib.figure.Figure): The matplotlib figure object.
+        ax (matplotlib.axes.Axes): The matplotlib axes object.
+        axis (Literal['x', 'y']): The axis to adjust ('x' or 'y').
+    
+    Returns:
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, str|None, int]: A tuple containing the updated figure and axes objects, the SI prefix used, and the SI exponent.
+    """
+    fig.canvas.draw()
+    if axis == 'x':
+        xlimits = ax.get_xlim()
+        siprefix, xsi_exponent, exponent_diff = get_SI_prefix(xlimits)
+        scale_factor = 10 ** (-xsi_exponent)
+        ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
+    elif axis == 'y':
+        ylimits = ax.get_ylim()
+        siprefix, xsi_exponent, exponent_diff = get_SI_prefix(ylimits)
+        scale_factor = 10 ** (-xsi_exponent)
+        ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda y, pos: f"{y * scale_factor:g}"))
+    return fig, ax, siprefix, xsi_exponent
+
+def set_prefix_in_label(string: str, prefix: str):
+        if re.search(r"\[\w", string):
+            return re.sub(r"\[(?=\w)", f"[{prefix}", string)
+        elif re.search(r"\(\w", string):
+            return re.sub(r"\((?=\w)", f"({prefix}", string)
+        else:
+            return f"{string} [{prefix}"
+
+##############################################################################
+##############################################################################
 # base function
+##############################################################################
 ##############################################################################
 
 def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float], 
@@ -47,11 +148,10 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
                                    legend_loc: str = 'best',
                                    xscale: str | None = None,
                                    yscale: str | None = None,
-                                   xstyle: str | None = None,
-                                   ystyle: str | None = None,
+                                   xstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = None,
+                                   ystyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = None,
                                    grid: bool = True,
                                    plot_error: bool = True,
-                                   fix_title_spacing: bool = False,
                                    ):
     """
     Plots a scatter plot with error bars for x and y.
@@ -72,8 +172,8 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
         legend_loc (str, optional):          location of the legend
         xscale (str | None, optional):       scale for x axis (e.g. 'linear', 'log')
         yscale (str | None, optional):       scale for y axis (e.g. 'linear', 'log')
-        xstyle (str | None, optional):       style for x axis ticks (e.g. 'plain', 'sci')
-        ystyle (str | None, optional):       style for y axis ticks (e.g. 'plain', 'sci')
+        xstyle (str | None, optional):       style for x axis ticks (e.g. 'plain', 'sci', 'prefix'). Note: 'prefix' is a custom style that uses SI prefixes for the axis labels.
+        ystyle (str | None, optional):       style for y axis ticks (e.g. 'plain', 'sci', 'prefix'). Note: 'prefix' is a custom style that uses SI prefixes for the axis labels.
         grid (bool, optional):               whether to show grid
         plot_error (bool, optional):         whether to plot error bars (if False, errors are ignored and only scatter points are plotted)
 
@@ -141,6 +241,25 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
         # plot the data without error bars
         ax.scatter(x_nom, y_nom, label=label, color=color, marker=cast(Any, marker), s=8)
 
+    xprefix = None
+    yprefix = None
+    if xstyle is not None:
+        if xstyle == 'prefix':
+            fig, ax, xprefix, xsi_exponent = prefixes_notation(fig, ax, 'x')
+        else:
+            ax.ticklabel_format(axis='x', style=cast(Any, xstyle), scilimits=(0,0), useMathText=True)
+    if ystyle is not None:
+        if ystyle == 'prefix':
+            fig, ax, yprefix, yexponent = prefixes_notation(fig, ax, 'y')
+        else:
+            ax.ticklabel_format(axis='y', style=cast(Any, ystyle), scilimits=(0,0), useMathText=True)
+
+    if xstyle == 'prefix' and x_label is not None:
+        if xprefix is not None:
+            x_label = set_prefix_in_label(string = x_label, prefix = xprefix)
+    if ystyle == 'prefix' and y_label is not None:
+        if yprefix is not None:
+            y_label = set_prefix_in_label(string = y_label, prefix = yprefix)
 
     if x_label is not None:
         ax.set_xlabel(x_label)
@@ -148,16 +267,7 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
         ax.set_ylabel(y_label, color=labelcolor)
 
     if title is not None:
-        if fix_title_spacing:
-            ax.set_title(
-                title, 
-                fontweight='semibold', 
-                fontfamily='monospace',
-                loc='center',
-                multialignment='left'
-            )
-        else:
-            ax.set_title(title, fontweight='semibold')
+        ax.set_title(title, fontweight='semibold')
 
     if label is not None and show_legend:
         ax.legend(loc=legend_loc)
@@ -165,15 +275,12 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
         ax.set_xscale(cast(Any, xscale))
     if yscale is not None:
         ax.set_yscale(cast(Any, yscale))
-    if xstyle is not None:
-        ax.ticklabel_format(axis='x', style=cast(Any, xstyle), scilimits=(0,0), useMathText=True)
-    if ystyle is not None:
-        ax.ticklabel_format(axis='y', style=cast(Any, ystyle), scilimits=(0,0), useMathText=True)
+
     if grid:
         ax.grid(True, which='both', linestyle='--')
     
-
     return fig, ax
+
 
 ##############################################################################
 # extended function with fit

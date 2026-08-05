@@ -15,6 +15,9 @@ from IPython.display import display
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
+# For type hints
+from typing import Any, Literal, cast
+
 
 import importlib
 # custom packages
@@ -325,6 +328,7 @@ def plot_comsol_data(df: pd.DataFrame,
                      x_label: str|None = None,
                      y_label: str|None = None,
                      title: str|None = None,
+                     add_title_info: bool = True,
                      label: str|None = None,
                      marker = 'o', 
                      color = 'tab:blue', 
@@ -335,8 +339,8 @@ def plot_comsol_data(df: pd.DataFrame,
                      legend_loc: str = 'best',
                      xscale: str|None = None,
                      yscale: str|None = None,
-                     xstyle: str|None = "sci",
-                     ystyle: str|None = "sci",
+                     xstyle: Literal['sci', 'scientific', 'plain', 'prefix'] = "prefix",
+                     ystyle: Literal['sci', 'scientific', 'plain', 'prefix'] = "prefix",
                      grid: bool = True,
                      ):
     """
@@ -350,6 +354,7 @@ def plot_comsol_data(df: pd.DataFrame,
         x_label (str | None, optional):          label for x axis
         y_label (str | None, optional):          label for y axis
         title (str | None, optional):            title of the plot
+        add_title_info (bool, optional):         whether to add model and date information from header_data to the title
         label (str | None, optional):            label for the data points (for legend)
         marker (str, optional):                  marker style for the data points
         color (str, optional):                   color for the data points and error bars
@@ -384,21 +389,24 @@ def plot_comsol_data(df: pd.DataFrame,
     if label is None:
         label = y_column
 
-    try: 
-        model = header_data["Model"].strip('.mph').replace("_", " ")
-        date = header_data["Date"]
-        titleprefix = f"{model} - {date}"
-    except KeyError:
-        print("Model and/or Date information not found in header_data.")
-        titleprefix = None
+    if add_title_info:
+        try: 
+            model = header_data["Model"].strip('.mph').replace("_", " ")
+            date = header_data["Date"]
+            titleprefix = f"{model} - {date}"
+        except KeyError:
+            print("Model and/or Date information not found in header_data.")
+            titleprefix = None
 
-    if titleprefix is None:
-        plot_title = title
-    else:
-        if title is None:
-            plot_title = titleprefix
+        if titleprefix is None:
+            plot_title = title
         else:
-            plot_title = f"{title} \n ({titleprefix})"
+            if title is None:
+                plot_title = titleprefix
+            else:
+                plot_title = f"{title} \n ({titleprefix})"
+    else:
+        plot_title = title
 
     fig, ax = pf.u_plot_scatter_with_error_bars(
         df[x_column].astype(float).tolist(),
@@ -458,6 +466,12 @@ def add_param_and_translate(
         
         if translation_dict and param_name in translation_dict:
             translated_name = translation_dict[param_name]
+            bracket_match = re.match(r".*\[(.*)\]$", translated_name)
+            if bracket_match:
+                unit = bracket_match.group(1)
+                translated_name = translated_name.replace(f" [{unit}]", "")
+            else:
+                unit = None
         else:
             translated_name = param_name
         
@@ -466,10 +480,13 @@ def add_param_and_translate(
         else:
             label += "\n"
 
-        label += f"{translated_name} = {value:.2e}"
+        siprefix, xsi_exponent, exponent_diff = pf.get_SI_prefix((value, value))  # Get the SI prefix for the value
+        scaled_value = value * 10 ** (-xsi_exponent)
 
-        if header_data and param_name in ['x', 'y', 'z']:
-            label += f" [{header_data.get('Length unit')}]"
+        label += f"{translated_name} = {scaled_value:.3g}"
+
+        if translation_dict and param_name in translation_dict:
+            label += f" [{siprefix}{unit}]"
         
         return label
 
@@ -484,6 +501,7 @@ def standard_plot(output_folder: str | None,
                   title_params: list[str] | None = None,
                   sweep_params: list[str] | None = None,
                   title: str | None = None,
+                  add_title_info: bool = True,
                   custom_label: str | None = None,
                   translation_dict: dict | None = None,
                   fig = None, 
@@ -503,6 +521,8 @@ def standard_plot(output_folder: str | None,
         df_param (pd.DataFrame):                    The original DataFrame containing the parameter values which will be used for the plot title ('root.current_A (A)' and 'root.current_B (A)').
         title_params (list[str], optional):         The parameters to include in the plot title. Defaults to None.
         sweep_params (list[str], optional):         The parameters that were swept (i.e. in interpolation or parameter sweep), which will be used for the legend label if custom_label is not provided. Defaults to None.
+        title (str, optional):                      A custom title for the plot. If not provided, the title will be generated based on title_params. Defaults to None.
+        add_title_info (bool, optional):            Whether to add model and date information from header_data to the title. Defaults to True.
         custom_label (str, optional):               A custom label for the legend. If not provided, the label will be generated based on sweep_params. Defaults to None.
         translation_dict (dict, optional):          A dictionary for translating parameter names to more descriptive labels for the axes. Defaults to None.
         fig (matplotlib.figure.Figure, optional):   A matplotlib figure object to plot on. If None, a new figure will be created. Defaults to None.
@@ -577,6 +597,7 @@ def standard_plot(output_folder: str | None,
         x_label = x_discription,
         y_label = y_discription,
         title = title,
+        add_title_info = add_title_info,
         label = label,
         marker = 'o', 
         color = color, 
@@ -587,9 +608,10 @@ def standard_plot(output_folder: str | None,
         legend_loc = 'best',
         xscale = None,
         yscale = None,
-        xstyle = 'sci',
-        ystyle = 'sci',
+        xstyle = 'prefix',
+        ystyle = 'prefix',
         grid = True,
+        
         )
     
     if save_plot:
