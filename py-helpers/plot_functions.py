@@ -74,6 +74,9 @@ def get_SI_prefix(limits: tuple[float, float])-> tuple[str|None, int, int]:
             "k": 3,    # Kilo
             "h": 2,    # Hecto
             "da": 1,   # Deca
+
+            # zero exponent (no prefix)
+            "": 0,     # No prefix
             
             # Small values (negative exponents)
             "d": -1,   # Deci

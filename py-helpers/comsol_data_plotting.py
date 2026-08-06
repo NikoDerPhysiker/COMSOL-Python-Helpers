@@ -12,12 +12,15 @@ from pathlib import Path
 from IPython.display import display
 
 
+from matplotlib import ticker
+
 import numpy as np
 from scipy.interpolate import LinearNDInterpolator
 
 # For type hints
 from typing import Any, Literal, cast
 
+import matplotlib.pyplot as plt
 
 import importlib
 # custom packages
@@ -30,6 +33,7 @@ importlib.reload(tl)
 # For type hints
 import matplotlib.axes
 import matplotlib.figure
+from matplotlib.markers import MarkerStyle
 
 
 ##############################################################################
@@ -438,7 +442,7 @@ def add_param_and_translate(
             param_name: str,
             df_curves: pd.DataFrame,
             df_param: pd.DataFrame,
-            label: str | None,
+            label: str | None = None,
             translation_dict: dict | None = None,
             header_data: dict | None = None,
             ):
@@ -456,13 +460,14 @@ def add_param_and_translate(
         Returns:
             (str): The updated label string with the parameter value added.
         """
+        
         if param_name in df_curves.columns:
             value = df_curves[param_name].iloc[0]
         elif param_name in df_param.columns:
             value = df_param[param_name].iloc[0]
         else:
-            print(f"Warning: '{param_name}' not found in df_curves or df_param.")
-            return label  # return the original label if the parameter is not found
+            tl.log_message(f"Warning: '{param_name}' not found in df_curves or df_param.")
+        
         
         if translation_dict and param_name in translation_dict:
             translated_name = translation_dict[param_name]
@@ -474,6 +479,8 @@ def add_param_and_translate(
                 unit = None
         else:
             translated_name = param_name
+
+        translated_name = translated_name.replace("-axis", "") 
         
         if label is None:
             label = ""
@@ -625,3 +632,225 @@ def standard_plot(output_folder: str | None,
 
 ##############################################################################
 ##############################################################################
+
+def plane_plot(
+        output_folder: str | None,
+        x_param: str,
+        y_param: str,
+        z_param: str,
+        header_data: dict,
+        df: pd.DataFrame,
+        df_param: pd.DataFrame,
+        title_params: list[str] | None = None,
+        sweep_params: list[str] | None = None,
+        title: str | None = None,
+        add_title_info: bool = True,
+        custom_label: str | None = None,
+        translation_dict: dict | None = None,
+        save_plot = True,
+        fig = None, 
+        ax = None,
+        colormap='viridis',
+        labelcolor = 'black',
+        xscale = None,
+        yscale = None,
+        xstyle = 'prefix',
+        ystyle = 'prefix',
+        zstyle = 'prefix',
+        grid = True,
+        ):    
+    """
+    Standard plot function for COMSOL data of magnetic field simulations.
+
+    Args:
+        output_folder (str):                        The folder where the plot will be saved.
+        x_param (str):                              The parameter to use for the x-axis.
+        y_param (str):                              The parameter to use for the y-axis.
+        z_param (str):                              The parameter plotted via colormap.
+        header_data (dict):                         The header data extracted from the COMSOL export file.
+        df (pd.DataFrame):                          The DataFrame containing the data to be plotted.
+        df_param (pd.DataFrame):                    The original DataFrame containing the parameter values which will be used for the plot title ('root.current_A (A)' and 'root.current_B (A)').
+        title_params (list[str], optional):         The parameters to include in the plot title. Defaults to None.
+        sweep_params (list[str], optional):         The parameters that were swept (i.e. in interpolation or parameter sweep), which will be used for the legend label if custom_label is not provided. Defaults to None.
+        title (str, optional):                      A custom title for the plot. If not provided, the title will be generated based on title_params. Defaults to None.
+        add_title_info (bool, optional):            Whether to add model and date information from header_data to the title. Defaults to True.
+        custom_label (str, optional):               A custom label for the legend. If not provided, the label will be generated based on sweep_params. Defaults to None.
+        translation_dict (dict, optional):          A dictionary for translating parameter names to more descriptive labels for the axes. Defaults to None.
+        fig (matplotlib.figure.Figure, optional):   A matplotlib figure object to plot on. If None, a new figure will be created. Defaults to None.
+        ax (matplotlib.axes.Axes, optional):        A matplotlib axes object to plot on. If None, a new axes will be created. Defaults to None.
+        color (str, optional):                      The color of the plot elements. Defaults to 'tab:blue'.
+        save_plot (bool, optional):                 Whether to save the plot as a PNG file. Defaults to True.
+    
+    Returns:
+        (matplotlib.figure.Figure, matplotlib.axes.Axes): The matplotlib figure and axes objects containing the plot.
+    """
+
+    # create label for legend
+    if custom_label:
+        label = custom_label
+    elif sweep_params:
+        label = ""
+        for sweep_param in sweep_params:
+            label = add_param_and_translate(
+                param_name=sweep_param,
+                df_curves=df,
+                df_param=df_param,
+                label=label,
+                translation_dict=translation_dict,
+                header_data=header_data,
+            )
+        label = label.strip()  # type: ignore
+    else:
+        label = z_param
+        if translation_dict and z_param in translation_dict:
+            label = translation_dict[z_param]
+            # bracket_match = re.match(r".*\[(.*)\]$", translated_name)
+            # if bracket_match:
+            #     unit = bracket_match.group(1)
+            #     translated_name = translated_name.replace(f" [{unit}]", "")
+            # else:
+            #     unit = None
+
+            # value = df[z_param].max()
+            # siprefix, xsi_exponent, exponent_diff = pf.get_SI_prefix((value, value))  # Get the SI prefix for the value
+            # label = f"{translated_name} [{siprefix}{unit}]"
+        
+    # create title for plot
+    if title_params:
+        if title is None:
+            title = ""
+        title += "\n"
+        for title_param in title_params:
+            title = add_param_and_translate(
+                param_name=title_param,
+                df_curves=df,
+                df_param=df_param,
+                label=title,
+                translation_dict=translation_dict,
+                header_data=header_data,
+            )
+    else:
+        title = title
+
+    # extract descriptions
+    if translation_dict:
+        try: 
+            x_discription = translation_dict.get(x_param)
+        except Exception as e:
+            print(f"Error retrieving x_param description: {e}")
+            x_discription = x_param
+
+        try:
+            y_discription = translation_dict.get(y_param)
+        except Exception as e:
+            print(f"Error retrieving y_param description: {e}")
+            y_discription = y_param
+
+    else:
+        x_discription = x_param
+        y_discription = y_param
+
+    if add_title_info:
+        try: 
+            model = header_data["Model"].strip('.mph').replace("_", " ")
+            date = header_data["Date"]
+            titleprefix = f"{model} - {date}"
+        except KeyError:
+            print("Model and/or Date information not found in header_data.")
+            titleprefix = None
+
+        if titleprefix is None:
+            plot_title = title
+        else:
+            if title is None:
+                plot_title = titleprefix
+            else:
+                plot_title = f"{title} \n ({titleprefix})"
+    else:
+        plot_title = title
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots()
+
+
+    x = df[x_param].to_numpy(dtype=np.float64)
+    y = df[y_param].to_numpy(dtype=np.float64)
+    z = df[z_param].to_numpy(dtype=np.float64)
+
+
+    img = ax.scatter(x, y, c=z, cmap=colormap, s=2, marker=MarkerStyle('o'))
+
+    cbar = fig.colorbar(img, ax=ax)
+    cbar.set_label(str(label), color=labelcolor)
+
+    zprefix = None
+    if zstyle is not None:
+        if zstyle == 'prefix':
+            z_abs_max = df[z_param].abs().max()
+            zprefix, zsi_exponent, zexponent = pf.get_SI_prefix((z_abs_max, z_abs_max))
+            z_scale_factor = 10 ** (-zsi_exponent)
+            cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * z_scale_factor:g}"))
+        else:
+            cbar.ax.ticklabel_format(axis='y', style=cast(Any, zstyle), scilimits=(0,0), useMathText=True)
+
+    if zstyle == 'prefix' and label is not None:
+        if zprefix is not None:
+            label = pf.set_prefix_in_label(string = label, prefix = zprefix)
+
+    cbar.set_label(str(label), color=labelcolor)
+
+
+    xprefix = None
+    yprefix = None
+    if xstyle is not None:
+        if xstyle == 'prefix':
+            x_abs_max = df[x_param].abs().max()
+            xprefix, xsi_exponent, xexponent = pf.get_SI_prefix((x_abs_max, x_abs_max))
+            scale_factor = 10 ** (-xsi_exponent)
+            ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
+        else:
+            ax.ticklabel_format(axis='x', style=cast(Any, xstyle), scilimits=(0,0), useMathText=True)
+    if ystyle is not None:
+        if ystyle == 'prefix':
+            y_abs_max = df[y_param].abs().max()
+            yprefix, ysi_exponent, yexponent = pf.get_SI_prefix((y_abs_max, y_abs_max))
+            scale_factor = 10 ** (-ysi_exponent)
+            ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
+        else:
+            ax.ticklabel_format(axis='y', style=cast(Any, ystyle), scilimits=(0,0), useMathText=True)
+
+    if xstyle == 'prefix' and x_discription is not None:
+        if xprefix is not None:
+            x_discription = pf.set_prefix_in_label(string = x_discription, prefix = xprefix)
+    if ystyle == 'prefix' and y_discription is not None:
+        if yprefix is not None:
+            y_discription = pf.set_prefix_in_label(string = y_discription, prefix = yprefix)
+
+    if x_discription is not None:
+        ax.set_xlabel(x_discription)
+    if y_discription is not None:
+        ax.set_ylabel(y_discription, color=labelcolor)
+
+    if title is not None:
+        ax.set_title(title, fontweight='semibold')
+
+    if xscale is not None:
+        ax.set_xscale(cast(Any, xscale))
+    if yscale is not None:
+        ax.set_yscale(cast(Any, yscale))
+
+    if grid:
+        ax.grid(True, which='both', linestyle='--')
+
+    
+    if save_plot:
+        if not output_folder:
+            raise ValueError("output_folder must be provided if save_plot is True.")
+        modelname = str(header_data.get('Model')).replace(".mph", "")
+        
+        clean_z_param = re.sub(r"\s*\(.*?\)", "", str(z_param))
+
+        output_path = Path(output_folder) / f"{modelname}-{clean_z_param}_over_{x_param}{y_param}-plane.png"
+        fig.savefig(str(output_path), dpi=300)
+    
+    return fig, ax
