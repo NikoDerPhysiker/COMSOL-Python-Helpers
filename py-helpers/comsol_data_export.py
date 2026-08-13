@@ -6,6 +6,7 @@
 ##############################################################################
 
 import math
+import hashlib
 
 import mph                              # api for comsol multiphysics
 
@@ -42,6 +43,68 @@ def printLine():
 
 def printDoubleLine():
     print('=' * LINELENGTH)
+
+
+##############################################################################
+##############################################################################
+
+def make_safe_output_filename(parent_folder: pathlib.Path,
+                              stem: str,
+                              suffix: str,
+                              max_total_length: int = 250) -> str:
+    """
+    Generates a safe output filename by ensuring that the total length of the filename (including the parent folder path) does not exceed a specified maximum length. 
+    If the combined length exceeds the limit, a hash digest is appended to the stem to shorten it.
+
+    Args:
+        parent_folder (pathlib.Path): The parent folder path where the file will be saved.
+        stem (str): The base name of the file (without suffix).
+        suffix (str): The file extension or suffix (e.g., '.txt', '.csv').
+        max_total_length (int, optional): The maximum allowed total length of the filename including the parent folder path. Default is 250.
+    """
+    parent_folder = pathlib.Path(parent_folder)
+    filename = f"{stem}{suffix}"
+    original_path = str(parent_folder / filename)
+    log_path = parent_folder / "shorter_paths_dictionary.csv"
+
+    def _append_log_row(result_filename: str):
+        with open(log_path, "a", newline="", encoding="utf-8") as log_file:
+            writer = csv.DictWriter(
+                log_file,
+                fieldnames=[
+                    "original_filename",
+                    "new_filename",
+                    "original_path_length",
+                    "original_full_path",
+                    "new_full_path",
+                ],
+            )
+            if log_file.tell() == 0:
+                writer.writeheader()
+            writer.writerow({
+                "original_filename": filename,
+                "new_filename": result_filename,
+                "original_path_length": len(original_path),
+                "original_full_path": original_path,
+                "new_full_path": str(parent_folder / result_filename),
+            })
+
+    if len(str(parent_folder / filename)) <= max_total_length:
+        _append_log_row(filename)
+        return filename
+
+
+    digest = hashlib.sha1(stem.encode("utf-8")).hexdigest()[:8]
+    short_suffix = f"_{digest}{suffix}"
+    available = max_total_length - len(str(parent_folder)) - 1
+    if available <= len(short_suffix):
+        result_filename = short_suffix[-available:]
+        _append_log_row(result_filename)
+        return result_filename
+
+    result_filename = f"{stem[:available - len(short_suffix)]}{short_suffix}"
+    _append_log_row(result_filename)
+    return result_filename
 
 ##############################################################################
 ##############################################################################
@@ -1392,7 +1455,7 @@ def simulate_model(
     last_start_time = tl.START_TIME
     last_last_time = tl.LAST_TIME
 
-    file_iteration = f"{filename}-iteration_{iteration_number}" if iteration_number else filename
+    file_iteration = f"{filename}-iteration_{iteration_number}" if iteration_number is not None else filename
 
     if tl.LOG_PATH is None or new_log_file:
         if tl.LOG_PATH is not None:
@@ -1435,7 +1498,7 @@ def simulate_model(
         makedirs(data_export_folder, exist_ok=True)
 
         # export model parameters to CSV
-        output_csv_path = data_export_folder / f"{modelname}-parameters.csv"
+        output_csv_path = data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-parameters.csv")
         if export_parameters_to_csv:
             save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
 
@@ -1467,7 +1530,7 @@ def simulate_model(
 
         # save the solved model
         if save_solved_model:
-            save_as_copy(model, client, str(output_folder / f"{modelname}-solved.mph"), smallerFilesize=False)
+            save_as_copy(model, client, str(output_folder / make_safe_output_filename(output_folder, modelname, "-solved.mph")), smallerFilesize=False)
 
         if evaluate_parameter_expressions:
             evaluate_parameters_and_terminals(
@@ -1481,7 +1544,7 @@ def simulate_model(
         if export_all_solution_data:
             # export data from the model
             export_node_label = override_export_variables(model, "PyExport", export_params, "Study 1/Solution 1", export_descriptions)
-            model.export(export_node_label, data_export_folder / f"{modelname}-exported_data.txt")
+            model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-exported_data.txt"))
 
             # Time logging
             tl.log_message(f"Exported all solution data of {modelname}.")
@@ -1513,7 +1576,7 @@ def simulate_model(
                                         dataset_identifier = cut_line_tag,
                                         descriptions = export_descriptions
                                         )
-                model.export(export_node_label, data_export_folder / f"{modelname}-depth_exported_data.txt")
+                model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-depth_exported_data.txt"))
                 
                 # Time logging
                 tl.log_message(f"Exported depth solution data of {modelname}.")
@@ -1538,7 +1601,7 @@ def simulate_model(
                                         dataset_identifier = cut_line_tag,
                                         descriptions = export_descriptions
                                         )
-                model.export(export_node_label, data_export_folder / f"{modelname}-homogeneity_exported_data.txt")
+                model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-homogeneity_exported_data.txt"))
                 
                 # Time logging
                 tl.log_message(f"Exported homogeneity solution data of {modelname}.")
@@ -1563,69 +1626,69 @@ def simulate_model(
                                         dataset_identifier = cut_line_tag,
                                         descriptions = export_descriptions
                                         )
-                model.export(export_node_label, data_export_folder / f"{modelname}-longitudinal_exported_data.txt")
+                model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-longitudinal_exported_data.txt"))
                 
                 # Time logging
                 tl.log_message(f"Exported longitudinal solution data of {modelname}.")
 
         if export_plane_solution_data:
-                    all_solution = find_COMSOL_dataset_tag(model=model, dataset_identifier= "Study 1/Solution 1", printFeedback = False)
+            all_solution = find_COMSOL_dataset_tag(model=model, dataset_identifier= "Study 1/Solution 1", printFeedback = False)
         
-                    if all_solution is None:
-                        all_solution = "sol1"
-                        tl.log_message(f"Warning: Dataset 'Study 1/Solution 1' not found. Using default dataset tag '{all_solution}' for line cut export.")
+            if all_solution is None:
+                all_solution = "sol1"
+                tl.log_message(f"Warning: Dataset 'Study 1/Solution 1' not found. Using default dataset tag '{all_solution}' for line cut export.")
 
-                    if True:
-                        cut_line_tag = create_comsol_cut_plane(
-                                            model = model,
-                                            input_tag = all_solution,
-                                            output_tag="Pycp1",
-                                            plane_direction = "xy",
-                                            coordinate = xy_plane_coordinate,
-                                            distances=None,
-                                            label="Cut Plane PyXY")
-                        
-                        export_node_label = override_export_variables(
-                                                model=model, 
-                                                export_node_name = "PyPlaneExport",
-                                                expressions  = export_params,
-                                                dataset_identifier = cut_line_tag,
-                                                descriptions = export_descriptions
-                                                )
-                        model.export(export_node_label, data_export_folder / f"{modelname}-xy_exported_data.txt")
-                        
-                        # Time logging
-                        tl.log_message(f"Exported plane solution data of {modelname}.")
+            if True:
+                cut_line_tag = create_comsol_cut_plane(
+                                    model = model,
+                                    input_tag = all_solution,
+                                    output_tag="Pycp1",
+                                    plane_direction = "xy",
+                                    coordinate = xy_plane_coordinate,
+                                    distances=None,
+                                    label="Cut Plane PyXY")
+                
+                export_node_label = override_export_variables(
+                                        model=model, 
+                                        export_node_name = "PyPlaneExport",
+                                        expressions  = export_params,
+                                        dataset_identifier = cut_line_tag,
+                                        descriptions = export_descriptions
+                                        )
+                model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-xy_exported_data.txt"))
+                
+                # Time logging
+                tl.log_message(f"Exported plane solution data of {modelname}.")
 
-                    if conductor_export_params is not None:
-                        cut_line_tag = create_comsol_cut_plane(
-                                            model = model,
-                                            input_tag = all_solution,
-                                            output_tag="Pycp2",
-                                            plane_direction = "xy",
-                                            coordinate = conductor_plane_coordinate,
-                                            distances=None,
-                                            label="Cut Plane PyConductor")
-                        
-                        export_node_label = override_export_variables(
-                                                model=model, 
-                                                export_node_name = "PyConductorExport",
-                                                expressions  = conductor_export_params,
-                                                dataset_identifier = cut_line_tag,
-                                                descriptions = conductor_export_descriptions
-                                                )
-                        model.export(export_node_label, data_export_folder / f"{modelname}-conductor_exported_data.txt")
-                        
-                        # Time logging
-                        tl.log_message(f"Exported plane solution data of {modelname}.")
+            if conductor_export_params is not None:
+                cut_line_tag = create_comsol_cut_plane(
+                                    model = model,
+                                    input_tag = all_solution,
+                                    output_tag="Pycp2",
+                                    plane_direction = "xy",
+                                    coordinate = conductor_plane_coordinate,
+                                    distances=None,
+                                    label="Cut Plane PyConductor")
+                
+                export_node_label = override_export_variables(
+                                        model=model, 
+                                        export_node_name = "PyConductorExport",
+                                        expressions  = conductor_export_params,
+                                        dataset_identifier = cut_line_tag,
+                                        descriptions = conductor_export_descriptions
+                                        )
+                model.export(export_node_label, data_export_folder / make_safe_output_filename(data_export_folder, modelname, "-conductor_exported_data.txt"))
+                
+                # Time logging
+                tl.log_message(f"Exported plane solution data of {modelname}.")
 
         # save the solved model
         if save_solved_model:
-            save_as_copy(model, client, str(output_folder / f"{modelname}-solved.mph"), smallerFilesize=False)
+            save_as_copy(model, client, str(output_folder / make_safe_output_filename(output_folder, modelname, "-solved.mph")), smallerFilesize=False)
 
         if save_small_model_version:
             # save a smaller version of the model (without solutions, but with the actually used settings, parameters and configured exports)
-            save_as_copy(model, client, str(output_folder / f"{modelname}-smallfile.mph"), smallerFilesize=True)
+            save_as_copy(model, client, str(output_folder / make_safe_output_filename(output_folder, modelname, "-smallfile.mph")), smallerFilesize=True)
 
         if not keep_model_after_simulation:
             # clear model from client
@@ -1741,7 +1804,7 @@ if False: # old function, not used anymore, but kept for reference
             makedirs(folder_path, exist_ok=True)  # create output folder if it doesn't exist
 
             # export the current parameter values to a CSV file for reference
-            output_csv_path = folder_path / f"{MODELNAME}-iteration_{iteration}-parameters.csv"
+            output_csv_path = folder_path / make_safe_output_filename(folder_path, MODELNAME, f"-iteration_{iteration}-parameters.csv")
             save_Parameter_List_to_CSV(model, str(output_csv_path), displayParams=False)
 
             if first_iteration:
