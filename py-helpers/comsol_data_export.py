@@ -1318,6 +1318,7 @@ def simulate_model(
         Longitudinal_orth_vector: list[int] | None = None,
 
         xy_plane_coordinate: float | str  = 0.0,
+        conductor_plane_coordinate: float | str  = "0.5*conductor_all_height",
 
         # boolean flags    
         export_parameters_to_csv: bool = True,
@@ -1365,7 +1366,8 @@ def simulate_model(
         Longitudinal_distances (None | list | tuple | np.ndarray | str):  Distances for additional parallel lines for the longitudinal cut line. If None, no additional lines will be created.
         Longitudinal_orth_vector (list[int]|None):  Orthogonal vector for the additional lines for the longitudinal cut line. If None, defaults to [0, 0, 1].
 
-        xy_plane_coordinate (float | str ):         The coordinate for the xy cut plane. If None, xy cut plane export will be skipped.
+        xy_plane_coordinate (float | str ):         The coordinate for the xy cut plane.
+        conductor_plane_coordinate (float | str ):  The coordinate for the conductor cut plane.
 
         export_parameters_to_csv (bool):            If True, exports model parameters to a CSV file.
         extend_export_from_params_in_csv (bool):    If True, extends the export parameters and descriptions with those from the exported CSV file. Can be used independet of "export_parameters_to_csv" if the CSV file already exists.
@@ -1410,6 +1412,8 @@ def simulate_model(
 
             # this function only uses one model
             model = model_list[0]
+            
+            keep_model_after_simulation = False  # flag to indicate that the model should be closed after simulation
         else:
             keep_model_after_simulation = True  # flag to indicate that the model should not be closed after simulation
 
@@ -1599,7 +1603,7 @@ def simulate_model(
                                             input_tag = all_solution,
                                             output_tag="Pycp2",
                                             plane_direction = "xy",
-                                            coordinate = "0.5*conductor_all_height",
+                                            coordinate = conductor_plane_coordinate,
                                             distances=None,
                                             label="Cut Plane PyConductor")
                         
@@ -1802,10 +1806,70 @@ if False: # old function, not used anymore, but kept for reference
 
 ##############################################################################
 
+def sweep_iteration_test(
+        sweep_parameters: list[str],
+        sweep_values: list[list],
+        print_feedback: bool = True
+    ):
+    """
+    Performs a test of the parameter sweep by iterating through the provided sweep values for the specified sweep parameters.
+    The function prints the current iteration number and the corresponding parameter values for each iteration, allowing for verification of the sweep setup without actually running the simulations.
+    The function also checks the validity of the provided sweep parameters and values, raising errors if any issues are found.
+    Function sweep_model() uses exactly the same loops but sets the parameters in the model and runs the simulation for each iteration.
+    
+    Args:
+        sweep_parameters (list):    A list of parameter names (str) to be swept.
+        sweep_values (list[list]):  A list of lists, where each inner list contains the values for all parameters for one iteration.
+                                    The length of the outer list gives the number of iterations for the sweep. 
+                                    Each inner list should have the same length as sweep_parameters, representing the values for each parameter in that iteration.
+        print_feedback (bool):      If True, prints feedback messages about the sweep setup and iterations. Default is True.
+
+    Returns:
+        bool: True if the test passed without errors, otherwise raises an error.
+    """
+    if print_feedback:
+        print(f"--- Iteration Test for Parameter Sweep Summary ---")
+        print(f"The length of sweep_parameters is {len(sweep_parameters)}.")
+        print(f"The number of iterations is {len(sweep_values)}.")
+        print(f"Provided sweep_parameters: {sweep_parameters}")
+
+    if sweep_parameters is None or len(sweep_parameters) == 0 or not isinstance(sweep_parameters, list):
+        raise TypeError("The argument 'sweep_parameters' must be a non-empty list of parameter names.")
+    for i, param in enumerate(sweep_parameters):
+        if not isinstance(param, str):
+            raise TypeError(f"The argument 'sweep_parameters' must be a list of strings. Found non-string at index {i}: {param}")
+
+    
+    for i, values in enumerate(sweep_values):
+        if len(values) != len(sweep_parameters):
+            raise TypeError(f"Mismatch in number of values and parameters for iteration {i+1}.")
+        for j, value in enumerate(values):
+            if not isinstance(value, (int, float, str)):
+                raise TypeError(f"Invalid type for sweep value at iteration {i+1}, parameter '{sweep_parameters[j]}': {value} (Type is: {type(value)}, but must be int, float, or str.)")
+
+    if print_feedback:
+        print("="*200)
+        for iteration, values in enumerate(sweep_values):
+            print("-"*200)
+            message = f"Iteration {iteration+1}/{len(sweep_values)} with parameter values {values}."
+            print(message)
+
+            sweep_list = list(zip(sweep_parameters, values))
+
+            # set the current parameters for this iteration
+            for paramname, paramvalue in sweep_list:
+                print(f"Setting parameter '{paramname}' to value {paramvalue}.")
+        print("="*200)
+
+        print("Sweep iteration test passed without errors.")
+
+
+##############################################################################
+
 def sweep_model(
         # sweep settings
-        sweep_parameter: list[str],
-        sweep_values: list[list[float | int | str]],
+        sweep_parameters: list[str],
+        sweep_values: list[list],
 
         # path settings
         filename: str,
@@ -1836,6 +1900,7 @@ def sweep_model(
         Longitudinal_orth_vector: list[int] | None = None,
 
         xy_plane_coordinate: float | str  = 0.0,
+        conductor_plane_coordinate: float | str  = "0.5*conductor_all_height",
 
         # boolean flags    
         export_parameters_to_csv: bool = True,
@@ -1854,11 +1919,13 @@ def sweep_model(
     Sweeps a COMSOL Multiphysics model by iterating through the provided sweep values for the specified sweep parameters.
     The function wraps the simulation process 'simulate_model()' for each combination of sweep values, allowing for automated parameter sweeps. 
     The exported files will be named based on the provided output folder with an added suffix indicating the iteration number.
+    To check the sweep setup without actually running the simulations, you can use the function 'sweep_iteration_test()' which uses the same loops but only prints the current iteration number and parameter values.
     
     Args:
-        sweep_parameter (list):                     A list of parameter names (str) to be swept.
-        sweep_values (list):                        A list of lists, where each inner list contains the values for the corresponding sweep parameter.
-                                                    The length of each inner list should be the same, representing the number of iterations for the sweep.
+        sweep_parameters (list):    A list of parameter names (str) to be swept.
+        sweep_values (list[list]):  A list of lists, where each inner list contains the values for all parameters for one iteration.
+                                    The length of the outer list gives the number of iterations for the sweep. 
+                                    Each inner list should have the same length as sweep_parameters, representing the values for each parameter in that iteration.
 
         filename (str):                             The name of the COMSOL model file to be imported.
         input_folder (pathlib.Path):                The folder path where the input model file is located.
@@ -1885,7 +1952,8 @@ def sweep_model(
         Longitudinal_distances (None | list | tuple | np.ndarray | str):  Distances for additional parallel lines for the longitudinal cut line. If None, no additional lines will be created.
         Longitudinal_orth_vector (list[int]|None):  Orthogonal vector for the additional lines for the longitudinal cut line. If None, defaults to [0, 0, 1].
 
-        xy_plane_coordinate (float | str ):         The coordinate for the xy cut plane. If None, xy cut plane export will be skipped.
+        xy_plane_coordinate (float | str ):         The coordinate for the xy cut plane.
+        conductor_plane_coordinate (float | str ):  The coordinate for the conductor cut plane.
 
         export_parameters_to_csv (bool):            If True, exports model parameters to a CSV file.
         evaluate_parameter_expressions (bool):      If True, evaluates parameter expressions and saves them to a CSV file.
@@ -1926,19 +1994,18 @@ def sweep_model(
     # this function only uses one model
     model = model_list[0]
     
-    sweep_parameters = list(zip(sweep_parameter, sweep_values))
-    message = f"Starting parameter sweep on model '{filename}' for parameters {sweep_parameter}."
+    message = f"Starting parameter sweep on model '{filename}' for parameters {sweep_parameters}."
     tl.log_message(message)
 
 
-    for iteration in range(len(sweep_values[0])):
-        message = f"Iteration {iteration+1}/{len(sweep_values[0])} with parameter values {[sweep_values[iteration] for _, sweep_values in sweep_parameters]}."
+    for iteration, values in enumerate(sweep_values):
+        message = f"Iteration {iteration+1}/{len(sweep_values)} with parameter values {values}."
         tl.log_message(message)
 
+        sweep_list = list(zip(sweep_parameters, values))
         # set the current parameters for this iteration
-        for paramname, paramvalues in sweep_parameters:
-            value = paramvalues[iteration]
-            model.parameter(paramname, value) 
+        for paramname, paramvalue in sweep_list:
+            model.parameter(paramname, paramvalue) 
 
         try:
             simulate_model(
@@ -1971,6 +2038,7 @@ def sweep_model(
                     Longitudinal_orth_vector = Longitudinal_orth_vector,
 
                     xy_plane_coordinate = xy_plane_coordinate,
+                    conductor_plane_coordinate = conductor_plane_coordinate,
 
                     # boolean flags    
                     export_parameters_to_csv = export_parameters_to_csv,
@@ -1995,7 +2063,7 @@ def sweep_model(
                 errormess = f"Error occurred while sweeping '{filename}.mph' in iteration {iteration}"
                 f.write(f"{errormess}: \n{str(e)}\n\n\n")
                 tl.log_message(errormess)
-        tl.log_message(f"Finished iteration {iteration+1}/{len(sweep_values[0])} of sweep for model '{filename}'.")
+        tl.log_message(f"Finished iteration {iteration+1}/{len(sweep_values)} of sweep for model '{filename}'.")
 
     # clear model from client after sweep is completed
     client.remove(model)
@@ -2184,7 +2252,7 @@ def calculate_grid_voltages(
         for node_start, node_end, r_seg in segments:
             current = (V_all[node_start] - V_all[node_end]) / r_seg
             r_mid = (coords[node_start] + coords[node_end]) / 2.0
-            dl = coords[node_end] - coords[node_start]
+            dl = coords[node_start] - coords[node_end]
             R_vec = r_target - r_mid
             R_mag = np.linalg.norm(R_vec)
             
@@ -2235,10 +2303,9 @@ def get_voltage_sweep_dict(
         dict: A dictionary where keys are terminal names (e.g., "V01", "V02", ..., "V20") and values are lists of calculated voltages corresponding to each angle in the sweep.
     """
     
-    sweep_dict = {}
-    num_iterations = len(angles)
+    parameter_values = []
 
-    for iteration, alpha in enumerate(angles):
+    for alpha in angles:
         # 1. Calculate target vector
         b_goal = calculate_xy_vector(alpha, magnitude, in_degrees=True)
 
@@ -2252,16 +2319,12 @@ def get_voltage_sweep_dict(
             conductivity=61.6e6,
         )
         
-        # 3. Store values in the dictionary
-        for terminal, v in enumerate(v_terminals):
-            key = f"V{terminal+1:02d}"
-            
-            # Initialize the list on the first iteration
-            if key not in sweep_dict:
-                sweep_dict[key] = [None] * num_iterations
-            
-            # Assign the value to the correct index position
+        # store parameter names
+        parameter_names = [f"V{terminal+1:02d}" for terminal in range(len(v_terminals))]
 
-            sweep_dict[key][iteration] = f"{v:.4g}[V]"
+        # store parameter values for this iteration in the array with all iterations
+        iter_parameter_values = [f"{v:.4g}[V]" for v in v_terminals]
+        parameter_values.append(iter_parameter_values)
 
-    return sweep_dict
+    # return sweep_dict
+    return parameter_names, parameter_values

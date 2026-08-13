@@ -24,8 +24,8 @@ import matplotlib.pyplot as plt
 
 import importlib
 # custom packages
-import plot_functions as pf
-importlib.reload(pf)
+import plot_functions as pfs
+importlib.reload(pfs)
 
 import time_logging as tl               # for logging time of function calls (custom python file)
 importlib.reload(tl)
@@ -412,7 +412,7 @@ def plot_comsol_data(df: pd.DataFrame,
     else:
         plot_title = title
 
-    fig, ax = pf.u_plot_scatter_with_error_bars(
+    fig, ax = pfs.u_plot_scatter_with_error_bars(
         df[x_column].astype(float).tolist(),
         df[y_column].astype(float).tolist(),
         x_label=x_label,
@@ -487,7 +487,7 @@ def add_param_and_translate(
         else:
             label += "\n"
 
-        siprefix, xsi_exponent, exponent_diff = pf.get_SI_prefix((value, value))  # Get the SI prefix for the value
+        siprefix, xsi_exponent, exponent_diff = pfs.get_SI_prefix((value, value))  # Get the SI prefix for the value
         scaled_value = value * 10 ** (-xsi_exponent)
 
         label += f"{translated_name} = {scaled_value:.3g}"
@@ -618,7 +618,6 @@ def standard_plot(output_folder: str | None,
         xstyle = 'prefix',
         ystyle = 'prefix',
         grid = True,
-        
         )
     
     if save_plot:
@@ -787,7 +786,7 @@ def plane_plot(
     if zstyle is not None:
         if zstyle == 'prefix':
             z_abs_max = df[z_param].abs().max()
-            zprefix, zsi_exponent, zexponent = pf.get_SI_prefix((z_abs_max, z_abs_max))
+            zprefix, zsi_exponent, zexponent = pfs.get_SI_prefix((z_abs_max, z_abs_max))
             z_scale_factor = 10 ** (-zsi_exponent)
             cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * z_scale_factor:g}"))
         else:
@@ -795,7 +794,7 @@ def plane_plot(
 
     if zstyle == 'prefix' and label is not None:
         if zprefix is not None:
-            label = pf.set_prefix_in_label(string = label, prefix = zprefix)
+            label = pfs.set_prefix_in_label(string = label, prefix = zprefix)
 
     cbar.set_label(str(label), color=labelcolor)
 
@@ -805,7 +804,7 @@ def plane_plot(
     if xstyle is not None:
         if xstyle == 'prefix':
             x_abs_max = df[x_param].abs().max()
-            xprefix, xsi_exponent, xexponent = pf.get_SI_prefix((x_abs_max, x_abs_max))
+            xprefix, xsi_exponent, xexponent = pfs.get_SI_prefix((x_abs_max, x_abs_max))
             scale_factor = 10 ** (-xsi_exponent)
             ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
         else:
@@ -813,7 +812,7 @@ def plane_plot(
     if ystyle is not None:
         if ystyle == 'prefix':
             y_abs_max = df[y_param].abs().max()
-            yprefix, ysi_exponent, yexponent = pf.get_SI_prefix((y_abs_max, y_abs_max))
+            yprefix, ysi_exponent, yexponent = pfs.get_SI_prefix((y_abs_max, y_abs_max))
             scale_factor = 10 ** (-ysi_exponent)
             ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
         else:
@@ -821,10 +820,10 @@ def plane_plot(
 
     if xstyle == 'prefix' and x_discription is not None:
         if xprefix is not None:
-            x_discription = pf.set_prefix_in_label(string = x_discription, prefix = xprefix)
+            x_discription = pfs.set_prefix_in_label(string = x_discription, prefix = xprefix)
     if ystyle == 'prefix' and y_discription is not None:
         if yprefix is not None:
-            y_discription = pf.set_prefix_in_label(string = y_discription, prefix = yprefix)
+            y_discription = pfs.set_prefix_in_label(string = y_discription, prefix = yprefix)
 
     if x_discription is not None:
         ax.set_xlabel(x_discription)
@@ -853,4 +852,66 @@ def plane_plot(
         output_path = Path(output_folder) / f"{modelname}-{clean_z_param}_over_{x_param}{y_param}-plane.png"
         fig.savefig(str(output_path), dpi=300)
     
+    return fig, ax
+
+##############################################################################
+##############################################################################
+
+def polar_plot(
+        df: pd.DataFrame,
+        angle_column: str,
+        r_column: str,
+        angle_label: str | None = "Angle [°]",
+        title: str = "Polar Plot",
+        marker: str = 'o',
+        color: str = 'tab:blue',
+        labelcolor: str = 'black',
+        label: str | None = None,
+        fig: matplotlib.figure.Figure | None = None,
+        ax: matplotlib.axes.Axes | None = None,
+        show_legend: bool = False,
+        legend_loc: str = 'best',
+        grid: bool = True,
+        ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
+    """
+    Create a polar plot from the given DataFrame.
+
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data to plot.
+        angle_column (str): The name of the column in df that contains the angle values (in degrees).
+        r_column (str): The name of the column in df that contains the radius values.
+        angle_label (str, optional): Label for the angle axis. Defaults to "Angle [°]".
+        r_label (str, optional): Label for the radius axis. Defaults to "Radius".
+        title (str, optional): Title of the plot. Defaults to "Polar Plot".
+        marker (str, optional): Marker style for the data points. Defaults to 'o'.
+        color (str, optional): Color for the data points. Defaults to 'tab:blue'.
+        labelcolor (str, optional): Color for the axis labels. Defaults to 'black'.
+        label (str | None, optional): Label for the data points (for legend). Defaults to None.
+        fig (matplotlib.figure.Figure | None, optional): Matplotlib figure to plot on. If None, a new figure is created. Defaults to None.
+        ax (matplotlib.axes.Axes | None, optional): Matplotlib axes to plot on. If None, a new axes is created. Defaults to None.
+        show_legend (bool, optional): Whether to show the legend. Defaults to False.
+        legend_loc (str, optional): Location of the legend. Defaults to 'best'.
+        grid (bool, optional): Whether to show grid lines. Defaults to True.
+    """
+    angle = df[angle_column]
+    r = df[r_column]
+
+    if fig is None or ax is None:
+        fig, ax = plt.subplots(subplot_kw={'projection': 'polar'})
+
+    if ax is not None:
+        ax.scatter(angle, np.abs(r), marker=cast(Any, marker), color=color, label=label)
+
+    if angle_label is not None:
+        ax.set_xlabel(angle_label, color=labelcolor)
+
+    if title is not None:
+        ax.set_title(title, fontweight='semibold')
+
+    if show_legend and label is not None:
+        ax.legend(loc=legend_loc)
+    
+    if grid:
+        ax.grid(True)
+
     return fig, ax
