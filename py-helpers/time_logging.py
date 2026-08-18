@@ -151,7 +151,6 @@ def log_time(message: str, start_time: float, last_time: float) -> float:
     return current_time
 
 ##############################################################################
-
 def log_message(message: str):
     """
     Logs a message with the elapsed time since the start and since the last log.

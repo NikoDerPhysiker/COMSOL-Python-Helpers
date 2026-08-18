@@ -1,5 +1,5 @@
 # Author: Niko Bleidistel
-# last change: 2026-06-30
+# last change: 2026-08-18
 
 ##############################################################################
 # import packages
@@ -15,7 +15,7 @@ from IPython.display import display
 from matplotlib import ticker
 
 import numpy as np
-from scipy.interpolate import LinearNDInterpolator
+from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
 
 # For type hints
 from typing import Any, Literal, cast
@@ -27,7 +27,7 @@ import importlib
 import plot_functions as pfs
 importlib.reload(pfs)
 
-import time_logging as tl               # for logging time of function calls (custom python file)
+import time_logging as tl          
 importlib.reload(tl)
 
 # For type hints
@@ -38,286 +38,186 @@ from matplotlib.markers import MarkerStyle
 
 ##############################################################################
 ##############################################################################
-# importing and interpolation functions
+# interpolation functions
 ##############################################################################
 ##############################################################################
 
-def find_all_files_in_folder(folder_path: str = ".", file_extension: str = "txt"):
-    """
-    Finds all files with a specific extension in a given folder and its subfolders.
+if False: # old function, not used anymore, needs fixing (and inefficient)
+    def filter_and_interpolate_df(df: pd.DataFrame,
+                                grid_dict: dict | None = None,
+                                limit_dict: dict | None = None,
+                                ):
+        """
+        Filters the DataFrame using a safety margin to prevent edge explosions,
+        performs fast spatial interpolation, and clips back to strict limits.
 
-
-    Args:
-        folder_path (str, optional):        The path to the folder where the search should be performed. Relative and absolute paths are supported. (default is "." = current directory).
-        file_extension (str, optional):     The file extension to look for (default is "txt").
-
-    Returns:
-        (list[str]):    A list of file paths that match the specified extension.
-
-    Raises:
-        ValueError:     If folder_path is not a string or if file_extension is not a string.
-    """
-
-    if not isinstance(folder_path, (str)):
-        raise ValueError("folder_path must be a string or representing the path to the folder.")
-    if not isinstance(file_extension, str):
-        raise ValueError("file_extension must be a string representing the file extension to look for.")
-
-    # use rglob to find all files with the specified extension in the folder and its subfolders
-    file_paths = [str(p) for p in Path(folder_path).rglob(f"*.{file_extension}")]
-
-    return file_paths
-
-##############################################################################
-##############################################################################
-
-def read_comsol_export(file_path: str):
-    """
-    Reads a COMSOL data export file and extracts header information into variables and the numerical data into a pandas DataFrame.
-    The function processes the file line by line, distinguishing between header lines (starting with '%') and data lines.
-
-    Args:
-        file_path (str): The path to the COMSOL data export file.
-
-    Returns:
-        (dict, pandas.DataFrame): A tuple containing the header information as key-value pairs and the numerical data as a pandas DataFrame.
-
-    Raises:
-        ValueError: If the file_path is not a string.
-    """
-    if not isinstance(file_path, (str)):
-        raise ValueError("file_path must be a string representing the path to the COMSOL data export file.")
-
-    tl.log_message(f"Reading COMSOL export file: {file_path}")
-    
-    header_data = {}
-    data_lines = []
-    column_names = []
-
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines() # read all lines at once
-
-    for line in lines:
-        line_str = line.strip() # remove leading/trailing whitespace and newline characters
-
-        # regex to split on two or more spaces or on a single space after a closing parenthesis or before 'root.'
-        regex = r"\s{2,}|(?<=\))\s+|\s+(?=root\.)"
+        Args:
+            df (pd.DataFrame): The input DataFrame containing the data to be filtered and interpolated.
+            grid_dict (dict | None): A dictionary specifying the exact coordinates for interpolation.
+            limit_dict (dict | None): A dictionary specifying the min and max limits for each column.
         
-        # extract header information from lines starting with '%'
-        if line_str.startswith("%"):
-            # delete the leading '%' and strip again to clean up the line
-            clean_line = line_str[1:].strip()
+        Returns:
+            (pd.DataFrame): The filtered and interpolated DataFrame.
+        """
 
-            # Split the line into key and value at the first occurrence of ':'
-            if ":" in clean_line:
-                key, val = clean_line.split(":", 1)
-                header_data[key.strip()] = val.strip()
-
-            # if line start with '%' but does not contain ':', it treated as a list of column names
-            elif clean_line.startswith("x") or clean_line.startswith("Position"):
-                
-                # Split the line into column names using regex to handle multiple spaces as delimiters
-                column_names = re.split(regex, clean_line)
+        if df is None:
+            raise ValueError("The input DataFrame 'df' is None.")
+        tl.log_message(f"Starting filtering and interpolation of DataFrame.")
+            
+        filtered_df = df.copy()
+        tl.log_message(f"Initial DataFrame shape: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
         
-        # if the line does not start with '%', it is treated as a data line and added to the list of data lines 
-        else:
-            # Only add non-empty lines to the data_lines list
-            if line_str:
-                data_lines.append(line_str)
-
-    # Create a DataFrame from the data lines using pandas
-    data_string = "\n".join(data_lines)                 # Join the list of data lines into a single string for pandas to read
-    df = pd.read_csv(
-        io.StringIO(data_string),                       # Use StringIO to read the data string as if it were a file
-        sep=regex,                                      # Use regex 
-        names=column_names,
-        engine='python',
-    )
-
-    tl.log_message(f"COMSOL export file read successfully: {file_path}")
-    return header_data, df
-
-##############################################################################
-##############################################################################
-import numpy as np
-import pandas as pd
-from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
-
-def filter_and_interpolate_df(df: pd.DataFrame,
-                              grid_dict: dict | None = None,
-                              limit_dict: dict | None = None,
-                              ):
-    """
-    Filters the DataFrame using a safety margin to prevent edge explosions,
-    performs fast spatial interpolation, and clips back to strict limits.
-
-    Args:
-        df (pd.DataFrame): The input DataFrame containing the data to be filtered and interpolated.
-        grid_dict (dict | None): A dictionary specifying the exact coordinates for interpolation.
-        limit_dict (dict | None): A dictionary specifying the min and max limits for each column.
-    
-    Returns:
-        (pd.DataFrame): The filtered and interpolated DataFrame.
-    """
-
-    if df is None:
-        raise ValueError("The input DataFrame 'df' is None.")
-    tl.log_message(f"Starting filtering and interpolation of DataFrame.")
-        
-    filtered_df = df.copy()
-    tl.log_message(f"Initial DataFrame shape: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
-    
-    # 1. Apply initial filtering with a SAFETY MARGIN to prevent edge effects during interpolation.
-    if limit_dict:
-        for column, limits in limit_dict.items():
-            if column in filtered_df.columns:
-                lower, upper = sorted(limits)
-                span = upper - lower
-                # 10% safety margin added to the outer boundaries
-                margin = span * 0.10 if span > 0 else 1e-6
-                
-                filtered_df = filtered_df[
-                    (filtered_df[column] >= (lower - margin)) & 
-                    (filtered_df[column] <= (upper + margin))
-                ]
-        tl.log_message(f"Filtering complete. DataFrame shape after filtering: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
-    if filtered_df.empty:
-        print("Warning: No data points remain after applying safety limits.")
-        tl.log_message(f"WARNING: No data points remain after applying safety limits.")
-        return filtered_df
-
-    if not grid_dict:
-        # If no grid specified, clip to strict limits immediately and return
+        # 1. Apply initial filtering with a SAFETY MARGIN to prevent edge effects during interpolation.
         if limit_dict:
             for column, limits in limit_dict.items():
                 if column in filtered_df.columns:
                     lower, upper = sorted(limits)
-                    filtered_df = filtered_df[(filtered_df[column] >= lower) & (filtered_df[column] <= upper)]
-        tl.log_message(f"No grid specified. Returning filtered DataFrame with shape: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
-        return filtered_df
+                    span = upper - lower
+                    # 10% safety margin added to the outer boundaries
+                    margin = span * 0.10 if span > 0 else 1e-6
+                    
+                    filtered_df = filtered_df[
+                        (filtered_df[column] >= (lower - margin)) & 
+                        (filtered_df[column] <= (upper + margin))
+                    ]
+            tl.log_message(f"Filtering complete. DataFrame shape after filtering: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
+        if filtered_df.empty:
+            print("Warning: No data points remain after applying safety limits.")
+            tl.log_message(f"WARNING: No data points remain after applying safety limits.")
+            return filtered_df
 
-    # Automatically detect coordinate columns (x, y, z) that are NOT defined in grid_dict
-    possible_coords = ['x', 'y', 'z']
-    preserved_axes = [col for col in possible_coords if col in filtered_df.columns and col not in grid_dict]
-    
-    interp_features = list(grid_dict.keys())
-    
-    target_columns = [
-        col for col in filtered_df.columns 
-        if col not in interp_features and col not in preserved_axes
-    ]
+        if not grid_dict:
+            # If no grid specified, clip to strict limits immediately and return
+            if limit_dict:
+                for column, limits in limit_dict.items():
+                    if column in filtered_df.columns:
+                        lower, upper = sorted(limits)
+                        filtered_df = filtered_df[(filtered_df[column] >= lower) & (filtered_df[column] <= upper)]
+            tl.log_message(f"No grid specified. Returning filtered DataFrame with shape: {len(filtered_df)} rows, {len(filtered_df.columns)} columns.")
+            return filtered_df
 
-    if not target_columns:
-        raise ValueError("No target columns left for interpolation.")
-
-    # Build the evaluation grid for the specified grid features
-    grid_arrays = [np.array(grid_dict[col]) for col in interp_features]
-    meshgrid = np.meshgrid(*grid_arrays, indexing='ij')
-    flat_grid = np.vstack([m.flatten() for m in meshgrid]).T
-    
-    results = []
-    tl.log_message(f"Starting interpolation.")
-    
-    # CASE 1: There are missing coordinates in grid_dict (like 'z'), which must be preserved fully
-    if preserved_axes:
-        filtered_df = filtered_df.sort_values(by=preserved_axes)
+        # Automatically detect coordinate columns (x, y, z) that are NOT defined in grid_dict
+        possible_coords = ['x', 'y', 'z']
+        preserved_axes = [col for col in possible_coords if col in filtered_df.columns and col not in grid_dict]
         
-        fit_coords_cols = interp_features + preserved_axes
-        source_coords = filtered_df[fit_coords_cols].values
+        interp_features = list(grid_dict.keys())
         
-        for point in flat_grid:
-            point_df = pd.DataFrame(index=filtered_df.index)
+        target_columns = [
+            col for col in filtered_df.columns 
+            if col not in interp_features and col not in preserved_axes
+        ]
+
+        if not target_columns:
+            raise ValueError("No target columns left for interpolation.")
+
+        # Build the evaluation grid for the specified grid features
+        grid_arrays = [np.array(grid_dict[col]) for col in interp_features]
+        meshgrid = np.meshgrid(*grid_arrays, indexing='ij')
+        flat_grid = np.vstack([m.flatten() for m in meshgrid]).T
+        
+        results = []
+        tl.log_message(f"Starting interpolation.")
+        
+        # CASE 1: There are missing coordinates in grid_dict (like 'z'), which must be preserved fully
+        if preserved_axes:
+            filtered_df = filtered_df.sort_values(by=preserved_axes)
             
-            for idx, col in enumerate(interp_features):
-                point_df[col] = point[idx]
+            fit_coords_cols = interp_features + preserved_axes
+            source_coords = filtered_df[fit_coords_cols].values
+            
+            for point in flat_grid:
+                point_df = pd.DataFrame(index=filtered_df.index)
                 
-            for col in preserved_axes:
-                point_df[col] = filtered_df[col]
-                
-            query_points = np.hstack([
-                np.tile(point, (len(filtered_df), 1)), 
-                filtered_df[preserved_axes].values
-            ])
-                
+                for idx, col in enumerate(interp_features):
+                    point_df[col] = point[idx]
+                    
+                for col in preserved_axes:
+                    point_df[col] = filtered_df[col]
+                    
+                query_points = np.hstack([
+                    np.tile(point, (len(filtered_df), 1)), 
+                    filtered_df[preserved_axes].values
+                ])
+                    
+                for target_col in target_columns:
+                    values = filtered_df[target_col].values
+                    
+                    try:
+                        interpolator = LinearNDInterpolator(source_coords, values) # type: ignore
+                        point_df[target_col] = interpolator(query_points)
+                    except Exception:
+                        interpolator = NearestNDInterpolator(source_coords, values) # type: ignore
+                        point_df[target_col] = interpolator(query_points)
+                    
+                results.append(point_df)
+            
+            if not results:
+                final_df = pd.DataFrame(columns=df.columns)
+            else:
+                final_df = pd.concat(results, ignore_index=True)
+            
+        # CASE 2: All coordinates are explicitly specified in grid_dict
+        else:
+            source_coords = filtered_df[interp_features].values
+            result_dict = {col: flat_grid[:, i] for i, col in enumerate(interp_features)}
+            final_df = pd.DataFrame(result_dict)
+            
             for target_col in target_columns:
                 values = filtered_df[target_col].values
-                
                 try:
                     interpolator = LinearNDInterpolator(source_coords, values) # type: ignore
-                    point_df[target_col] = interpolator(query_points)
+                    final_df[target_col] = interpolator(flat_grid)
                 except Exception:
                     interpolator = NearestNDInterpolator(source_coords, values) # type: ignore
-                    point_df[target_col] = interpolator(query_points)
-                
-            results.append(point_df)
+                    final_df[target_col] = interpolator(flat_grid)
+        tl.log_message(f"Interpolation complete. DataFrame shape after interpolation: {len(final_df)} rows, {len(final_df.columns)} columns.")
+
+        # 2. FINAL CLIPPING: Crop back to the strict limits requested by the user
+        if limit_dict and not final_df.empty:
+            for column, limits in limit_dict.items():
+                if column in final_df.columns:
+                    lower, upper = sorted(limits)
+                    final_df = final_df[
+                        (final_df[column] >= lower) & (final_df[column] <= upper)
+                    ]
+        tl.log_message(f"Final clipping complete. DataFrame shape after clipping: {len(final_df)} rows, {len(final_df.columns)} columns.")
+        return final_df
         
-        if not results:
-            final_df = pd.DataFrame(columns=df.columns)
-        else:
-            final_df = pd.concat(results, ignore_index=True)
+    ##############################################################################
+
+    def mask_and_interpolate_data(df: pd.DataFrame,
+                                x_params: list[str],
+                                y_params: list[str],
+                                grid_dict: dict | None = None,
+                                limit_dict: dict | None = None,
+                                ):
+        """
+        Import Data from a COMSOL export txt file, filter and interpolate in prepatration for plotting.
+
+        Args:
+            df (pandas.DataFrame): The DataFrame containing the COMSOL data.
+            x_params (list[str]): The parameters to use for the x-axis.
+            y_params (list[str]): The parameters to use for the y-axis.
+            grid_dict (dict | None, optional): Dictionary defining the grid for interpolation. Defaults to None.
+            limit_dict (dict | None, optional): Dictionary defining the limits for filtering. Defaults to None.
         
-    # CASE 2: All coordinates are explicitly specified in grid_dict
-    else:
-        source_coords = filtered_df[interp_features].values
-        result_dict = {col: flat_grid[:, i] for i, col in enumerate(interp_features)}
-        final_df = pd.DataFrame(result_dict)
-        
-        for target_col in target_columns:
-            values = filtered_df[target_col].values
-            try:
-                interpolator = LinearNDInterpolator(source_coords, values) # type: ignore
-                final_df[target_col] = interpolator(flat_grid)
-            except Exception:
-                interpolator = NearestNDInterpolator(source_coords, values) # type: ignore
-                final_df[target_col] = interpolator(flat_grid)
-    tl.log_message(f"Interpolation complete. DataFrame shape after interpolation: {len(final_df)} rows, {len(final_df.columns)} columns.")
+        Returns:
+            (pandas.DataFrame): The filtered and interpolated DataFrame.
+        """
+        tl.log_message(f"Starting mask and interpolation of DataFrame.")
+        # mask before interpolation to reduce computational load
+        keep_columns = ['x', 'y', 'z'] + x_params + y_params
+        actual_columns_2keep = list(dict.fromkeys(keep_columns))                                     # ensure that the list of columns to keep does not contain duplicates
+        df_interpol = df[actual_columns_2keep]                                                       # filter the DataFrame to keep only the relevant columns
 
-    # 2. FINAL CLIPPING: Crop back to the strict limits requested by the user
-    if limit_dict and not final_df.empty:
-        for column, limits in limit_dict.items():
-            if column in final_df.columns:
-                lower, upper = sorted(limits)
-                final_df = final_df[
-                    (final_df[column] >= lower) & (final_df[column] <= upper)
-                ]
-    tl.log_message(f"Final clipping complete. DataFrame shape after clipping: {len(final_df)} rows, {len(final_df.columns)} columns.")
-    return final_df
-    
-##############################################################################
-
-def mask_and_interpolate_data(df: pd.DataFrame,
-                              x_params: list[str],
-                              y_params: list[str],
-                              grid_dict: dict | None = None,
-                              limit_dict: dict | None = None,
-                              ):
-    """
-    Import Data from a COMSOL export txt file, filter and interpolate in prepatration for plotting.
-
-    Args:
-        df (pandas.DataFrame): The DataFrame containing the COMSOL data.
-        x_params (list[str]): The parameters to use for the x-axis.
-        y_params (list[str]): The parameters to use for the y-axis.
-        grid_dict (dict | None, optional): Dictionary defining the grid for interpolation. Defaults to None.
-        limit_dict (dict | None, optional): Dictionary defining the limits for filtering. Defaults to None.
-    
-    Returns:
-        (pandas.DataFrame): The filtered and interpolated DataFrame.
-    """
-    tl.log_message(f"Starting mask and interpolation of DataFrame.")
-    # mask before interpolation to reduce computational load
-    keep_columns = ['x', 'y', 'z'] + x_params + y_params
-    actual_columns_2keep = list(dict.fromkeys(keep_columns))                                     # ensure that the list of columns to keep does not contain duplicates
-    df_interpol = df[actual_columns_2keep]                                                       # filter the DataFrame to keep only the relevant columns
-
-    # filtering and interpolation of the DataFrame 
-    df_curves = filter_and_interpolate_df(
-        df=df_interpol, 
-        grid_dict=grid_dict, 
-        limit_dict=limit_dict,
-        )
-    tl.log_message(f"Mask and interpolation complete. DataFrame shape after processing: {len(df_curves)} rows, {len(df_curves.columns)} columns.")
-    return df_curves
+        # filtering and interpolation of the DataFrame 
+        df_curves = filter_and_interpolate_df(
+            df=df_interpol, 
+            grid_dict=grid_dict, 
+            limit_dict=limit_dict,
+            )
+        tl.log_message(f"Mask and interpolation complete. DataFrame shape after processing: {len(df_curves)} rows, {len(df_curves.columns)} columns.")
+        return df_curves
 
 ##############################################################################
 ##############################################################################
