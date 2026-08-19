@@ -250,12 +250,12 @@ def u_plot_scatter_with_error_bars(x: list[UncFloat] | list[float],
         if xstyle == 'prefix':
             fig, ax, xprefix, xsi_exponent = prefixes_notation(fig, ax, 'x')
         else:
-            ax.ticklabel_format(axis='x', style=cast(Any, xstyle), scilimits=(0,0), useMathText=True)
+            ax.ticklabel_format(axis='x', style=cast(Any, xstyle), scilimits=(0,0), useMathText=True) # type: ignore
     if ystyle is not None:
         if ystyle == 'prefix':
             fig, ax, yprefix, yexponent = prefixes_notation(fig, ax, 'y')
         else:
-            ax.ticklabel_format(axis='y', style=cast(Any, ystyle), scilimits=(0,0), useMathText=True)
+            ax.ticklabel_format(axis='y', style=cast(Any, ystyle), scilimits=(0,0), useMathText=True) # type: ignore
 
     if xstyle == 'prefix' and x_label is not None:
         if xprefix is not None:

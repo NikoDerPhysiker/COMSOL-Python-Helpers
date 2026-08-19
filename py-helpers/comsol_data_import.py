@@ -9,6 +9,7 @@ import re
 import io
 
 import pandas as pd
+import numpy as np
 
 import importlib
 # custom packages
@@ -91,3 +92,70 @@ def read_comsol_export(file_path: str):
 
     tl.log_message(f"COMSOL export file read successfully: {file_path}")
     return header_data, df
+
+##############################################################################
+##############################################################################
+
+def round_to_6_sig_digits(series: pd.Series) -> pd.Series:
+    """
+    Rounds a numeric pandas Series to exactly 6 significant digits.
+    """
+    valid_series = series.dropna()
+    if valid_series.empty:
+        return series
+    abs_series = valid_series.abs()
+    # If all non-NaN values are 0, return a series filled with 0.0
+    if (abs_series == 0).all():
+        return pd.Series(0.0, index=series.index)
+    # Handle zeros carefully to avoid log10 infinity errors
+    with np.errstate(divide="ignore"):
+        exponent = np.where(abs_series > 0, np.floor(np.log10(abs_series)), 0)
+    # 5 minus the exponent gives exactly 6 significant digits
+    decimals = 5 - exponent.astype(int)
+    # Compute rounded values while strictly preserving the DataFrame indices
+    rounded_list = [
+        round(val, max(0, dec)) if pd.notna(val) else np.nan
+        for val, dec in zip(valid_series, decimals)
+    ]
+    return pd.Series(rounded_list, index=valid_series.index)
+
+##############################################################################
+
+def find_constant_columns(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Identifies numeric columns in a DataFrame that contain only a single constant
+    value within the first 25 rows, ignoring NaN values and checking up to 6
+    significant digits. Non-numeric columns are skipped.
+
+    Returns:
+        pd.DataFrame: A DataFrame with two columns: "Constants" and "Value",
+                      containing the names of constant columns and their
+                      corresponding constant values.
+    """
+    # Look only at the first 25 rows
+    df_sample = df.head(25)
+    constants_dict = {}
+    for col in df_sample.columns:
+        series = df_sample[col]
+        # Skip non-numeric columns safely (handles StringDtype, object, datetime, etc.)
+        if not pd.api.types.is_numeric_dtype(series.dtype):
+            continue
+        # Extract the series and explicitly drop NaN values
+        valid_series = series.dropna()
+        # Skip columns that are completely empty or contain only NaNs
+        if valid_series.empty:
+            continue
+        # Round the remaining non-NaN values to 6 significant digits
+        rounded_series = round_to_6_sig_digits(valid_series)
+        # Check if all remaining valid values are identical after rounding
+        if rounded_series.dropna().nunique() == 1:
+            # Safely extract the first element as the scalar representation
+            constants_dict[col] = rounded_series.dropna().iloc[0]
+    # Construct the final resulting DataFrame
+    return pd.DataFrame(
+        list(constants_dict.items()), columns=["Constants", "Value"]
+    )
+        
+
+##############################################################################
+##############################################################################
