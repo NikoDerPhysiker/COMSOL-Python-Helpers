@@ -17,6 +17,7 @@ from matplotlib import ticker
 from typing import Literal
 import matplotlib.axes
 import matplotlib.figure
+from pathlib import Path
 
 
 ##############################################################################
@@ -29,7 +30,7 @@ FONTSIZE = 12           # in pt, of the latex document
 TEXTWIDTH = 455.24411   # in pt, of the latex document
 TEXTHEIGHT = 535.6748   # in pt, of the latex document
 
-MARKERSIZE = 25         # of the plot markers
+MARKERSIZE = 20         # of the plot markers
 TITLECOLOR = (0 / 255, 51 / 255, 102 / 255) # color of the title = FAU-Blau
 
 ##############################################################################
@@ -48,7 +49,7 @@ plt.rcParams.update({
     "text.usetex": True,
     "font.family": "sans-serif",
     "font.serif": ["Latin Modern Roman"], 
-    "text.latex.preamble": r"\usepackage{amsmath} \usepackage{lmodern} \usepackage{upgreek} \usepackage{xfrac}",
+    "text.latex.preamble": r"\usepackage{amsmath} \usepackage{lmodern} \usepackage{upgreek} \usepackage{xfrac} \usepackage{bm}",
 })
 
 plt.rcParams.update({
@@ -80,17 +81,37 @@ def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplot
     fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
 
     return fig_width_in, fig_height_in
+    
+
+
+def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
+    """
+    Saves the given figure to a PDF file in the specified output folder.
+    
+    Args:
+        fig (matplotlib.figure.Figure): The matplotlib figure object to save.
+        path (Path | str): The path where the figure will be saved.
+        fraction (float): The fraction of the page width to use for the figure.
+        subplots (tuple): The number of rows and columns of subplots.
+    """
+    fig.savefig(
+        str(path)+".pdf",
+        bbox_inches='tight',
+        backend='pdf',
+        )
+    plt.close(fig)  # Close the figure after saving to free up memory
 
 ##############################################################################
 ##############################################################################
 
-def get_SI_prefix(limits: tuple[float, float], use_u_as_micro: bool = False) -> tuple[str | None, int, int]:
+def get_SI_prefix(limits: tuple[float, float], use_u_as_micro: bool = False, bm: bool = False) -> tuple[str | None, int, int]:
         """
         Returns the SI prefix for a given numeric value.
         
         Args:
             limits (tuple[float, float]): A tuple containing the minimum and maximum values.
             use_u_as_micro (bool): Whether to use 'u' as the symbol for micro or 'μ'.
+            bm (bool): Whether to use bold math formatting for the SI prefix.
         
         Returns:
             tuple[str|None, int, int]: A tuple containing the SI prefix, the SI exponent, and the exponent difference to the magnitude of the input values.
@@ -108,44 +129,45 @@ def get_SI_prefix(limits: tuple[float, float], use_u_as_micro: bool = False) -> 
         # Define the mapping of SI prefixes to their corresponding exponents
         PREFIX_TO_EXPONENT = {
             # Large values (positive exponents)
-            "Q": 30,   # Quetta
-            "R": 27,   # Ronna
-            "Y": 24,   # Yotta
-            "Z": 21,   # Zetta
-            "E": 18,   # Exa
-            "P": 15,   # Peta
-            "T": 12,   # Tera
-            "G": 9,    # Giga
-            "M": 6,    # Mega
-            "k": 3,    # Kilo
-            "h": 2,    # Hecto
-            "da": 1,   # Deca
+            r"\mathrm{Q}": 30,   # Quetta
+            r"\mathrm{R}": 27,   # Ronna
+            r"\mathrm{Y}": 24,   # Yotta
+            r"\mathrm{Z}": 21,   # Zetta
+            r"\mathrm{E}": 18,   # Exa
+            r"\mathrm{P}": 15,   # Peta
+            r"\mathrm{T}": 12,   # Tera
+            r"\mathrm{G}": 9,    # Giga
+            r"\mathrm{M}": 6,    # Mega
+            r"\mathrm{k}": 3,    # Kilo
+            r"\mathrm{h}": 2,    # Hecto
+            r"\mathrm{da}": 1,   # Deca
 
             # zero exponent (no prefix)
             "": 0,     # No prefix
             
             # Small values (negative exponents)
-            "d": -1,   # Deci
-            "c": -2,   # Centi
-            "m": -3,   # Milli
-            "u": -6,   # Micro (often written as µ)
-            "n": -9,   # Nano
-            "p": -12,  # Pico
-            "f": -15,  # Femto
-            "a": -18,  # Atto
-            "z": -21,  # Zepto
-            "y": -24,  # Yocto
-            "r": -27,  # Ronto
-            "q": -30,   # Quekto
+            r"\mathrm{d}": -1,   # Deci
+            r"\mathrm{c}": -2,   # Centi
+            r"\mathrm{m}": -3,   # Milli
+            r"\mathrm{u}": -6,   # Micro (often written as µ)
+            r"\mathrm{n}": -9,   # Nano
+            r"\mathrm{p}": -12,  # Pico
+            r"\mathrm{f}": -15,  # Femto
+            r"\mathrm{a}": -18,  # Atto
+            r"\mathrm{z}": -21,  # Zepto
+            r"\mathrm{y}": -24,  # Yocto
+            r"\mathrm{r}": -27,  # Ronto
+            r"\mathrm{q}": -30,   # Quekto
         }
         if not use_u_as_micro:
             # PREFIX_TO_EXPONENT["μ"] = -6   # Use 'μ' for micro instead of 'u'
-            # PREFIX_TO_EXPONENT[r"$\\mu$"] = -6   # Use 'μ' for micro instead of 'u'
-            PREFIX_TO_EXPONENT[r"$\\upmu$"] = -6   # Use 'μ' for micro instead of 'u'
-            del PREFIX_TO_EXPONENT["u"]    # Remove 'u' from the dictionary
+            PREFIX_TO_EXPONENT[r"\mathrm{\upmu}"] = -6   # Use 'μ' for micro instead of 'u'
+            del PREFIX_TO_EXPONENT[r"\mathrm{u}"]    # Remove 'u' from the dictionary
 
         # Returns the key, or None if the value doesn't exist
         siprefix = next((k for k, v in PREFIX_TO_EXPONENT.items() if v == xsi_exponent), None)
+        if bm and siprefix is not None:
+            siprefix = r"\bm{" + siprefix.strip("$") + "}"  # Add bold math formatting to the SI prefix
         return siprefix, xsi_exponent, exponent_diff
 
 ##############################################################################
@@ -190,29 +212,58 @@ def set_prefix_in_label(string: str, prefix: str):
         Returns:
             str: The modified string with the SI prefix inserted.
         """
-        if re.search(r"\[\w", string):
-            return re.sub(r"\[(?=\w)", f"[{prefix}", string)
-        elif re.search(r"\(\w", string):
-            return re.sub(r"\((?=\w)", f"({prefix}", string)
+        # if re.search(r"$\[\w", string):
+            # return re.sub(r"\[(?=\w)", f"[{prefix}", string)
+        if r"$[" in string:
+            return string.replace("$[", f"$[{prefix}")
+        # elif re.search(r"$\(\w", string):
+            # return re.sub(r"\((?=\w)", f"({prefix}", string)
+        elif r"$(" in string:
+            return string.replace("$(", f"$({prefix}")
         else:
-            return f"{string} [{prefix}"
+            return f"{string} [{prefix}1]"
 
 ##############################################################################
 
-def set_prefix_in_number_unit_string(string: str):
+def set_prefix_in_number_unit_string(string: str, bm: bool = False) -> str:
     """
     Searches the pattern '= number [' in the string. Then it extracts the number and uses  
+    Args:
+        string (str): The input string containing the number and unit.
+        bm (bool): Whether to use bold math formatting for the SI prefix. Default is False.
     """
-    pattern = r"=\s*(-?\d+\.?\d*)(?:\s*\[)?"
+    pattern = r"(=\s*)(-?\d+\.?\d*(?:[eE][-+]?\d+)?)(?=\s*\[)"
+    # matches the pattern '= number [' in the string, where 'number' can be an integer or a float (including scientific notation).
+    # (=\s*) matches the equal sign followed by optional whitespace and captures it as group 1.
+    # (-?\d+\.?\d*(?:[eE][-+]?\d+)?) matches the number (including optional scientific notation) and captures it as group 2.
+    # # -?\d+\.?\d* matches an optional negative sign, followed by one or more digits, an optional decimal point, and zero or more digits.
+    # # (?:[eE][-+]?\d+)? matches an optional scientific notation part, which consists of 'e' or 'E', an optional sign, and one or more digits.
+    # (?=\s*\[) is a positive lookahead that ensures the number is followed by optional whitespace and an opening square bracket, but does not include it in the match.
+    
     match = re.search(pattern, string)
     if match:
-        number = float(match.group(1))
-        siprefix, xsi_exponent, exponent_diff = get_SI_prefix((number, number))
-        scaled_number = number * (10 ** (-xsi_exponent))
-
+        prefix_part = match.group(1) # the '=' and any optional whitespace before the number
+        number_str = match.group(2)  # the number in float format or scientific notation
+        number = float(number_str) # convert matched number from string to float
+        
+        # get the prefix
+        siprefix, xsi_exponent, exponent_diff = get_SI_prefix((number, number), bm=bm)
+        
         if siprefix is not None:
-            string = re.sub(pattern, f"= {scaled_number} [{siprefix}", string)
+            # scale the number according to the SI prefix exponent
+            scaled_number = number * (10 ** (-xsi_exponent))
+            scaled_str = f"{scaled_number:g}"
+            
+            # replace the matched pattern in the string with the scaled number
+            string = re.sub(pattern, rf"{prefix_part}{scaled_str}", string, count=1)
+            
+            # insert the SI prefix into the string behind opening rectangular bracket 
+            string = string.replace("[", f"[{siprefix}")
+            
     return string
+
+
+
 
 ##############################################################################
 ##############################################################################
@@ -281,9 +332,14 @@ def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | No
     """
 
     # split the label into variable and rest
-    label_parts = label.strip().split('=')  # split the label at '=' 
-    variable = label_parts[0].strip()       # get the variable name
-    rest = '='.join(label_parts[1:]) if len(label_parts) > 1 else ''  # get the rest of the label after '='
+    if '=' not in label:
+        if translation_dict is not None and label in translation_dict:
+            label = translation_dict[label]
+        return label
+    else:
+        label_parts = label.strip().split('=')  # split the label at '=' 
+        variable = label_parts[0].strip()       # get the variable name
+        rest = '='.join(label_parts[1:]) if len(label_parts) > 1 else ''  # get the rest of the label after '='
 
     if translation_dict is not None and variable in translation_dict:
         variable = translation_dict[variable]
@@ -397,6 +453,12 @@ def plot_background(
         else:
             ax.ticklabel_format(axis='y', style=ystyle, scilimits=(0,0), useMathText=True)
 
+    # get current label if not provided
+    if x_label is None:
+        x_label = ax.get_xlabel()
+    if y_label is None:
+        y_label = ax.get_ylabel()
+
     # apply 'prefix' style to labels
     if xstyle == 'prefix' and x_label is not None:
         if xprefix is not None:
@@ -413,9 +475,17 @@ def plot_background(
 
     # show title, legend and grid
     if title is not None:
-        ax.set_title(rf"\textbf{{{title}}}", color=TITLECOLOR)
+        if "(" in title:
+            main_title = title.split("(")[0].strip()
+            subtitle = "(" + title.split("(")[1].strip()
+        else:
+            main_title = title
+            subtitle = ""
 
-    ax.grid(True, which='both', linestyle='--')
+        ax.set_title(rf"\textbf{{{main_title}}}"+"\n"+rf"{{{subtitle}}}", color=TITLECOLOR, pad=20)
+
+    ax.set_axisbelow(True)  # Ensure grid is below other plot elements
+    ax.grid(True, which='both', linestyle='--', zorder=0)
     
     return fig, ax
 

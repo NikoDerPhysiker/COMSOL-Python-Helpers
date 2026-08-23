@@ -6,14 +6,16 @@
 ##############################################################################
 
 import pandas as pd
-
 import importlib
+
+from matplotlib import ticker
 
 # custom packages
 import advanced_plotting_functions as apf
 _ = importlib.reload(apf)
 
 # for type hints
+from typing import Literal
 import matplotlib.figure
 import matplotlib.axes
 
@@ -28,6 +30,7 @@ def standard_scatter_plot(
         x: list[float],
         y: list[float],
         z: list[float] | None = None,
+
         label: str | None = None,
         color: tuple[float, float, float] |str | None = apf.TITLECOLOR,
         markersize: float = apf.MARKERSIZE,
@@ -42,6 +45,11 @@ def standard_scatter_plot(
         title: str | None = None,
         x_label: str | None = None, 
         y_label: str | None = None,
+        z_label: str | None = None,
+
+        xstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
+        ystyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
+        zstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'prefix',
     ):
     """
     Create a standard scatter plot.
@@ -78,11 +86,37 @@ def standard_scatter_plot(
             label += labelpart + "\n"
         label = label.rstrip("\n")
 
+    
     # plot
     if z is None:
+        # mean y for multiple y values with same x
+        if len(x) == len(y):
+            unique_x = sorted(set(x))
+            mean_y = [sum(y[i] for i in range(len(x)) if x[i] == ux) / sum(1 for i in range(len(x)) if x[i] == ux) for ux in unique_x]
+            x = unique_x
+            y = mean_y
         ax.scatter(x, y, label=label, color=color, s=markersize)
     else:
-        ax.scatter(x, y, c=z, cmap='viridis', label=label, s=markersize)
+        img = ax.scatter(x, y, c=z, cmap='viridis', label=label, s=markersize)
+        cbar = fig.colorbar(img, ax=ax)
+
+        if translation_dict is not None and z_label is not None and z_label in translation_dict:
+            z_label = translation_dict[z_label]
+
+        zprefix = None
+        if zstyle is not None:
+            if zstyle == 'prefix':
+                z_abs_max = max(abs(z_val) for z_val in z)
+                zprefix, zsi_exponent, zexponent = apf.get_SI_prefix((z_abs_max, z_abs_max))
+                z_scale_factor = 10 ** (-zsi_exponent)
+                cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * z_scale_factor:g}"))
+            else:
+                cbar.ax.ticklabel_format(axis='y', style= zstyle, scilimits=(0,0), useMathText=True)
+    
+        if zstyle == 'prefix' and z_label is not None:
+            if zprefix is not None:
+                z_label = apf.set_prefix_in_label(string = z_label, prefix = zprefix)
+            cbar.set_label(z_label, rotation=270, labelpad=10 + 2*apf.FONTSIZE,)
 
     # translate labels if translation_dict is provided
     if translation_dict is not None:
@@ -96,8 +130,8 @@ def standard_scatter_plot(
                                   title=title, 
                                   x_label=x_label, 
                                   y_label=y_label,
-                                  xstyle = 'prefix',
-                                  ystyle = 'prefix',
+                                  xstyle = xstyle,
+                                  ystyle = ystyle,
                                   )
 
     if label is not None:
