@@ -99,7 +99,8 @@ def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
         bbox_inches='tight',
         backend='pdf',
         )
-    plt.close(fig)  # Close the figure after saving to free up memory
+    plt.show()
+    # plt.close(fig)  # Close the figure after saving to free up memory
 
 ##############################################################################
 ##############################################################################

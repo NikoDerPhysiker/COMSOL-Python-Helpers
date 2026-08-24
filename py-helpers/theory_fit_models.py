@@ -10,7 +10,7 @@ import pandas as pd
 
 ##############################################################################
 ##############################################################################
-# theory helpers
+# Magnetic field
 ##############################################################################
 ##############################################################################
 
@@ -75,7 +75,7 @@ def biot_savart_vec_theo(
 
     return B_vec
 
-import numpy as np
+##############################################################################
 
 def biot_savart_rectangular_conductor(
     pos: tuple[float, float, float],    
@@ -144,6 +144,9 @@ def biot_savart_rectangular_conductor(
 
 ##############################################################################
 ##############################################################################
+# Temperature
+##############################################################################
+##############################################################################
 
 def power_per_length(
         I: float = 10e-3,                # current in A
@@ -176,150 +179,23 @@ def power_per_length(
 # })
 
 ##############################################################################
-# old version of temp_est() is commented out below, kept for reference
-
-# def temp_est(
-#         df: pd.DataFrame,               # DataFrame with the layer data
-#         power: float = power_per_length(), # Heating power in W/m (P/l in the PDF)
-#         z: float = 0.0,                 # Distance from the conductor (z=0) in m, must be <= 0
-#         y: float = 0.0,                 # Distance from the conductor (y=0) in m
-#         T_iso: float = 293.15,          # Isothermal temperature in K (T_0 in the PDF)
-#     ):
-#     """
-#     Estimate the temperature at a given point in space due to heat dissipation 
-#     from a rectangular conductor using a combined 1D/2D analytical approach.
-
-#     Args:
-#         df (pd.DataFrame):  DataFrame containing the layer properties.
-#         power (float):      Heating power in W/m (default: calculated using power_per_length()).
-#         z (float):          Distance from the conductor along the z-axis (must be <= 0).
-#         y (float):          Distance from the conductor along the y-axis.
-#         T_iso (float):      Isothermal temperature in K (default: 293.15 K).
-#     """
-    
-#     # 1. Identify conductor properties
-#     cond_mask = df["name"] == "conductor"
-#     w = float(df.loc[cond_mask, "width"].iloc[0])
-    
-#     # 2. Filter out the conductor from the thermal path calculation
-#     layers_df = df[~cond_mask].copy().reset_index(drop=True)
-    
-#     # 3. Classify layers as narrow (1D heat flow) or wide (2D/logarithmic heat flow)
-#     rtol = 1e-5  
-#     atol = 1e-9  
-
-#     # isclose logic
-#     absolute_diff = (layers_df["width"] - w).abs()
-#     tolerance_limit = atol + rtol * abs(w)
-
-#     # apply logic to layer dataframe
-#     layers_df["is_narrow"] = absolute_diff <= tolerance_limit
-#     layers_df["is_wide"] = ~layers_df["is_narrow"] & (layers_df["width"] > w)
-
-#     # 4. Calculate negative z-boundaries for each layer below the conductor (z=0)
-#     cumsum_thickness = layers_df["thickness"].cumsum()
-#     layers_df["z_end"] = -cumsum_thickness
-#     layers_df["z_start"] = layers_df["z_end"] + layers_df["thickness"]
-    
-#     # Total thickness of all layers combined (isothermal boundary at negative z)
-#     z_const = cumsum_thickness.iloc[-1]
-    
-#     # Clamp z to the valid physical domain: z must be between -z_const and 0.0
-#     z = np.clip(z, -z_const, 0.0)
-
-#     # 5. Find the transition boundary Z_0 between narrow stack and wide stack
-#     # Z_0 is the bottom interface of the last narrow layer. 
-#     # If the first layer is already wide, Z_0 remains 0.0.
-#     narrow_layers = layers_df[layers_df["is_narrow"]]
-#     Z_0 = narrow_layers["z_end"].iloc[-1] if not narrow_layers.empty else 0.0
-
-#     # Define the core conformal mapping distance functions relative to the source interface (Z_0)
-#     def r1(val_z):
-#         return np.sqrt(y**2 + (val_z - Z_0)**2)
-
-#     def r2(val_z):
-#         # Image source mirrored at the isothermal boundary (z = -z_const)
-#         return np.sqrt(y**2 + (val_z + 2 * z_const + Z_0)**2)
-
-#     # 6. Piecewise Temperature Calculation
-#     # Step A: Target z lies within the 1D narrow layer stack (closer to conductor, z >= Z_0)
-#     if z >= Z_0:
-#         T_Z0 = T_iso
-#         wide_layers = layers_df[layers_df["is_wide"]]
-        
-#         # Integrate 2D thermal resistance upwards from the isothermal bottom to Z_0
-#         for _, row in wide_layers.iterrows():
-#             k_sub = row["thermal_conductivity"]
-#             z_s = row["z_start"]  
-#             z_e = row["z_end"]    
-            
-#             # Avoid the core singularity at the line source using the w/2 boundary condition
-#             r1_s = max(r1(z_s), w / 2.0)
-#             r1_e = max(r1(z_e), w / 2.0)
-            
-#             T_Z0 += (power / (np.pi * k_sub)) * np.log((r2(z_s) * r1_e) / (r1_s * r2(z_e)))
-            
-#         T = T_Z0
-
-
-#         # Add the linear 1D resistance from the transition boundary Z_0 up to the target z
-#         for _, row in narrow_layers.iterrows():
-#             # Bestimme die Grenzen der Schicht im Intervall [Z_0, z]
-#             overlap_bottom = max(Z_0, row["z_end"])
-#             overlap_top = min(z, row["z_start"])
-
-#             # Wenn die Schicht im aktiven Bereich liegt, ist top > bottom
-#             if overlap_top > overlap_bottom:
-#                 thickness_active = overlap_top - overlap_bottom
-#                 T += power * (
-#                     thickness_active / (row["thermal_conductivity"] * w)
-#                 )
-
-#     # Step B: Target z lies within the 2D wide layer stack (deeper in substrate, z < Z_0)
-#     else:
-#         T = T_iso
-#         wide_layers = layers_df[layers_df["is_wide"]]
-        
-#         for _, row in wide_layers.iterrows():
-#             k_sub = row["thermal_conductivity"]
-#             z_s = row["z_start"]   
-#             z_e = row["z_end"]     
-            
-#             # If the layer is entirely below (more negative than) z, it contributes its full profile
-#             if z <= z_s:
-#                 r1_s = max(r1(z_s), w / 2.0)
-#                 r1_e = max(r1(z_e), w / 2.0)
-#                 T += (power / (np.pi * k_sub)) * np.log((r2(z_s) * r1_e) / (r1_s * r2(z_e)))
-            
-#             # If target z falls inside this layer, integrate from the bottom boundary (z_e) up to z
-#             elif z_e <= z < z_s:
-#                 r1_z = max(r1(z), w / 2.0)
-#                 r1_e = max(r1(z_e), w / 2.0)
-#                 T += (power / (np.pi * k_sub)) * np.log((r2(z) * r1_e) / (r1_z * r2(z_e)))
-#                 break  # Layers above the target coordinate do not influence its temperature
-
-#     return T
-
-##############################################################################
-# old version of temp_est(), fits approximation, but not simulations data
-
-def temp_est(
+def temp_est_line_source_approximation(
         df: pd.DataFrame,               # DataFrame with the layer data
-        power: float = power_per_length(), # Heating power in W/m (P/l in the PDF)
+        power_per_length: float = power_per_length(), # Heating power in W/m (P/l in the PDF)
         z: float = 0.0,                 # Distance from the conductor (z=0) in m, must be <= 0
         y: float = 0.0,                 # Distance from the conductor (y=0) in m
         T_iso: float = 293.15,          # Isothermal temperature in K (T_0 in the PDF)
     ):
     """
     Estimate the temperature at a given point in space due to heat dissipation 
-    from a rectangular conductor using a combined 1D/2D analytical approach.
+    from a rectangular conductor using a combined 1D/2D analytical approach and approximating the conductor as a line source.
 
     Args:
-        df (pd.DataFrame):  DataFrame containing the layer properties.
-        power (float):      Heating power in W/m (default: calculated using power_per_length()).
-        z (float):          Distance from the conductor along the z-axis (must be <= 0).
-        y (float):          Distance from the conductor along the y-axis.
-        T_iso (float):      Isothermal temperature in K (default: 293.15 K).
+        df (pd.DataFrame):          DataFrame containing the layer properties.
+        power_per_length (float):   Heating power in W/m (default: calculated using power_per_length()).
+        z (float):                  Distance from the conductor along the z-axis (must be <= 0).
+        y (float):                  Distance from the conductor along the y-axis.
+        T_iso (float):              Isothermal temperature in K (default: 293.15 K).
     """
     
     # 1. Identify conductor properties
@@ -342,12 +218,12 @@ def temp_est(
     layers_df["is_wide"] = ~layers_df["is_narrow"] & (layers_df["width"] > w)
 
     # 4. Calculate negative z-boundaries for each layer below the conductor (z=0)
-    cumsum_thickness = layers_df["thickness"].cumsum()
-    layers_df["z_end"] = -cumsum_thickness
-    layers_df["z_start"] = layers_df["z_end"] + layers_df["thickness"]
+    cumsum_height = layers_df["height"].cumsum()
+    layers_df["z_end"] = -cumsum_height
+    layers_df["z_start"] = layers_df["z_end"] + layers_df["height"]
     
     # Total thickness of all layers combined (isothermal boundary at negative z)
-    z_const = cumsum_thickness.iloc[-1]
+    z_const = cumsum_height.iloc[-1]
     
     # Clamp z to the valid physical domain: z must be between -z_const and 0.0
     z = np.clip(z, -z_const, 0.0)
@@ -383,7 +259,7 @@ def temp_est(
             r1_s = max(r1(z_s), w / 2.0)
             r1_e = max(r1(z_e), w / 2.0)
             
-            T_Z0 += (power / (np.pi * k_sub)) * np.log((r2(z_s) * r1_e) / (r1_s * r2(z_e)))
+            T_Z0 += (power_per_length / (np.pi * k_sub)) * np.log((r2(z_s) * r1_e) / (r1_s * r2(z_e)))
             
         T = T_Z0
 
@@ -394,7 +270,7 @@ def temp_est(
 
             if overlap_top > overlap_bottom:
                 thickness_active = overlap_top - overlap_bottom
-                T += power * (thickness_active / (row["thermal_conductivity"] * w))
+                T += power_per_length * (thickness_active / (row["thermal_conductivity"] * w))
 
     # Step B: Target z lies within the 2D wide layer stack (z < Z_0)
     else:
@@ -412,100 +288,225 @@ def temp_est(
                 r1_s = max(r1(z_s), w / 2.0)
                 r1_e = max(r1(z_e), w / 2.0)
                 # Korrektes Verhältnis: r1_e/r1_s für die Quelle, r2_s/r2_e für die Senke
-                T += (power / (np.pi * k_sub)) * np.log((r1_e * r2(z_s)) / (r1_s * r2(z_e)))
+                T += (power_per_length / (np.pi * k_sub)) * np.log((r1_e * r2(z_s)) / (r1_s * r2(z_e)))
             
             # Ziel-z liegt genau in dieser Schicht: Integriere von Schicht-Untergrenze (z_e) bis z
             elif z_e <= z < z_s:
                 r1_z = max(r1(z), w / 2.0)
                 r1_e = max(r1(z_e), w / 2.0)
                 # Integration von der isothermen Grenze (z_e) hoch zum Punkt z
-                T += (power / (np.pi * k_sub)) * np.log((r1_e * r2(z)) / (r1_z * r2(z_e)))
+                T += (power_per_length / (np.pi * k_sub)) * np.log((r1_e * r2(z)) / (r1_z * r2(z_e)))
                 break
 
     return T
 
 ##############################################################################
 
-
-# def temp_est(
-#         df: pd.DataFrame,               # DataFrame with the layer data
-#         power: float = 1.0,             # Heating power in W/m (P/l)
-#         z: float = 0.0,                 # Distance from the conductor (z=0) in m, must be <= 0
-#         T_iso: float = 293.15,          # Isothermal temperature in K (T_0)
-#         y: float = 0.0,                 # Distance from the conductor (y=0) in m
-#     ):
-#     """
-#     Estimate the temperature at a given point in space due to heat dissipation 
-#     from a rectangular conductor using a continuous bottom-up integration.
-#     """
-#     # 1. Identify conductor properties
-#     cond_mask = df["name"] == "conductor"
-#     w = float(df.loc[cond_mask, "width"].iloc[0])
+def strip_source_integral(y: float, z_rel: float, w: float) -> float:
+    """
+    Analytical integration of the logarithmic temperature contribution from a finite-width strip source.
+    """
+    # Protect against exact zero distance singularities
+    z_eff = np.maximum(np.abs(z_rel), 1e-12)
     
-#     # 2. Filter out the conductor from the thermal path calculation
-#     layers_df = df[~cond_mask].copy().reset_index(drop=True)
+    left = y - w / 2.0
+    right = y + w / 2.0
     
-#     # 3. Classify layers as narrow (1D heat flow) or wide (2D/logarithmic heat flow)
-#     rtol = 1e-5  
-#     atol = 1e-9  
-#     absolute_diff = (layers_df["width"] - w).abs()
-#     tolerance_limit = atol + rtol * abs(w)
-#     layers_df["is_narrow"] = absolute_diff <= tolerance_limit
-#     layers_df["is_wide"] = ~layers_df["is_narrow"] & (layers_df["width"] > w)
-
-#     # 4. Calculate negative z-boundaries for each layer below the conductor (z=0)
-#     cumsum_thickness = layers_df["thickness"].cumsum()
-#     layers_df["z_end"] = -cumsum_thickness
-#     layers_df["z_start"] = layers_df["z_end"] + layers_df["thickness"]
+    # Indefinite integral of ln(y'^2 + z^2) dy' evaluated at boundaries
+    term_r = right * np.log(right**2 + z_eff**2) - 2.0 * right + 2.0 * z_eff * np.arctan(right / z_eff)
+    term_l = left * np.log(left**2 + z_eff**2) - 2.0 * left + 2.0 * z_eff * np.arctan(left / z_eff)
     
-#     # Total thickness of all layers combined (isothermal boundary at negative z)
-#     z_const = cumsum_thickness.iloc[-1]
+    return 0.5 * (term_r - term_l)
+
+##############################################################################
+
+def temp_est_refraction_spreading(
+    df: pd.DataFrame,
+    power_per_length: float,
+    z: float = 0.0,
+    y: float = 0.0,
+    T_iso: float = 293.15,
+) -> float:
+    """
+    Estimate the temperature at a given point in space due to heat dissipation
+    from a rectangular conductor using a combined 1D/2D analytical approach,
+    while integrating the finite-width strip source contributions and 
+    calculating the spreading of the heat flux by thermal refraction due to the change in thermal conductivity.
     
-#     # Clamp z to the valid physical domain: z must be between -z_const and 0.0
-#     z = np.clip(z, -z_const, 0.0)
-
-#     # 5. Find the transition boundary Z_0 between narrow stack and wide stack
-#     narrow_layers = layers_df[layers_df["is_narrow"]]
-#     Z_0 = narrow_layers["z_end"].iloc[-1] if not narrow_layers.empty else 0.0
-
-#     # Pure distance functions to preserve the exact geometric curvature in the substrate
-#     def r1(val_z):
-#         return np.sqrt(y**2 + (val_z - Z_0)**2)
-
-#     def r2(val_z):
-#         # Image source mirrored at the isothermal bottom boundary (z = -z_const)
-#         return np.sqrt(y**2 + (val_z + 2 * z_const + Z_0)**2)
-
-#     # 6. Continuous Bottom-Up Integration
-#     T = T_iso
+    Args:
+        df (pd.DataFrame):          DataFrame containing the layer properties.
+        power_per_length (float):   Heating power in W/m (P/l).
+        z (float):                  Distance from the conductor along the z-axis (must be <= 0).
+        y (float):                  Distance from the conductor along the y-axis.
+        T_iso (float):              Isothermal temperature in K (default: 293.15 K).
+    """
     
-#     # Effective core radius to eliminate the mathematical log-singularity at the interface
-#     # Setting this to a fraction of the conductor width keeps the substrate curve perfectly intact
-#     r_core = 0.15 * w  
+    # 1. Identify conductor properties
+    cond_mask = df["name"] == "conductor"
+    w = float(df.loc[cond_mask, "width"].iloc[0])
+    
+    # 2. Filter out conductor
+    layers_df = df[~cond_mask].copy().reset_index(drop=True)
 
-#     # Iterate through all layers from bottom to top (reverse order of dataframe)
-#     for _, row in layers_df.iloc[::-1].iterrows():
-#         z_s = row["z_start"]  # Top of current layer (larger, less negative z)
-#         z_e = row["z_end"]    # Bottom of current layer (smaller, more negative z)
+    # 3. Calculate negative z-boundaries
+    cumsum_height = layers_df["height"].cumsum()
+    layers_df["z_end"] = -cumsum_height
+    layers_df["z_start"] = layers_df["z_end"] + layers_df["height"]
+    
+    z_const = cumsum_height.iloc[-1]
+    z = np.clip(z, -z_const, 0.0)
+
+    # 4. Top-Down Width Inheritance via Thermal Refraction Law
+    # The bottom-most layer (substrate) serves as the isotropic 45-degree reference (sf=1.0)
+    k_substrate = float(layers_df["thermal_conductivity"].iloc[-1])
+    
+    layers_df["w_eff_top"] = 0.0
+    layers_df["w_eff_bottom"] = 0.0
+    
+    current_w_eff = w  
+    
+    for idx, row in layers_df.iterrows():
+        z_s = row["z_start"]
+        z_e = row["z_end"]
+        h = row["height"]
+        k_layer = row["thermal_conductivity"]
         
-#         if z <= z_e:
-#             continue  # This layer is entirely above our target z
-            
-#         z_top_active = min(z, z_s)
+        # Physics-driven spreading factor via flux line refraction
+        sf = 1.0 * (k_layer / k_substrate)
         
-#         # Case A: 2D Wide Substrate Layer
-#         if row["is_wide"]:
-#             # Protect the active r1 distance from reaching 0 right at the Z_0 interface
-#             r1_active_top = max(r1(z_top_active), r_core)
-#             r1_active_bot = max(r1(z_e), r_core)
-            
-#             T += (power / (np.pi * row["thermal_conductivity"])) * np.log(
-#                 (r2(z_top_active) * r1_active_bot) / (r1_active_top * r2(z_e))
-#             )
-            
-#         # Case B: 1D Narrow Layer (Insulator / Epilayer)
-#         elif row["is_narrow"]:
-#             active_thickness = z_top_active - z_e
-#             T += power * (active_thickness / (row["thermal_conductivity"] * w))
+        layers_df.at[idx, "w_eff_top"] = current_w_eff
+        
+        # Virtual footprint expands based on the localized material constriction
+        w_eff_bottom = current_w_eff + 2.0 * h * sf
+        layers_df.at[idx, "w_eff_bottom"] = w_eff_bottom
+        
+        current_w_eff = w_eff_bottom
 
-#     return T
+    # 5. Unified 2D Temperature Calculation (Bottom-Up Local Integration)
+    T = T_iso
+    layers_reversed = layers_df.iloc[::-1]
+    
+    for _, row in layers_reversed.iterrows():
+        z_s = row["z_start"]   
+        z_e = row["z_end"]     
+        w_top = row["w_eff_top"]
+        w_bot = row["w_eff_bottom"]
+        k_sub = row["thermal_conductivity"]
+        
+        # Determine active depth boundaries for this layer relative to target z
+        overlap_bottom = z_e
+        overlap_top = min(z_s, z)
+        
+        if overlap_top > overlap_bottom:
+            # Represent the continuous expansion via its mean effective width
+            w_layer_eff = 0.5 * (w_top + w_bot)
+            
+            # Localized coordinate tracking: Relative distances to the layer top (z_s)
+            z_rel_top = overlap_top - z_s
+            z_rel_bottom = overlap_bottom - z_s
+            
+            # Primary virtual source contribution (r1 equivalent)
+            int_r1_top = strip_source_integral(y, z_rel_top, w_layer_eff)
+            int_r1_bottom = strip_source_integral(y, z_rel_bottom, w_layer_eff)
+            
+            # Mirrored source contribution across the bottom isothermal boundary
+            z_mirror = -2.0 * z_const - z_s
+            int_r2_top = strip_source_integral(y, overlap_top - z_mirror, w_layer_eff)
+            int_r2_bottom = strip_source_integral(y, overlap_bottom - z_mirror, w_layer_eff)
+            
+            delta_integral_r1 = int_r1_bottom - int_r1_top
+            delta_integral_r2 = int_r2_top - int_r2_bottom
+            
+            # Add scaled temperature contribution using the local virtual footprint width
+            T += (power_per_length / (np.pi * k_sub * w_layer_eff)) * (delta_integral_r1 + delta_integral_r2)
+            
+        if z_e <= z <= z_s:
+            break
+            
+    return T
+
+##############################################################################
+
+def temp_est_integration_spreading(
+    df: pd.DataFrame,               # DataFrame with the layer data
+    power_per_length: float,        # Heating power in W/m (P/l)
+    z: float = 0.0,                 # Distance from the conductor (z=0) in m, must be <= 0
+    y: float = 0.0,                 # Distance from the conductor (y=0) in m
+    T_iso: float = 293.15,          # Isothermal boundary temperature in K (T_0)
+) -> float:
+    """
+    Estimate the temperature at a given point in space due to heat dissipation 
+    from a rectangular conductor using a combined 1D/2D analytical approach,
+    while integrating the finite-width strip source contributions and
+    calculating the spreading of the heat flux by integration.
+
+    Args:
+        df (pd.DataFrame):          DataFrame containing the layer properties.
+        power_per_length (float):   Heating power in W/m (P/l).
+        z (float):                  Distance from the conductor along the z-axis (must be <= 0).
+        y (float):                  Distance from the conductor along the y-axis.
+        T_iso (float):              Isothermal boundary temperature in K (default: 293.15 K).
+    """
+    
+    # 1. Identify conductor properties
+    cond_mask = df["name"] == "conductor"
+    w = float(df.loc[cond_mask, "width"].iloc[0])
+    
+    # 2. Filter out the conductor from the thermal path calculation
+    layers_df = df[~cond_mask].copy().reset_index(drop=True)
+
+    # 3. Calculate negative z-boundaries (0.0 at conductor, moving down to negative values)
+    cumsum_height = layers_df["height"].cumsum()
+    layers_df["z_end"] = -cumsum_height
+    layers_df["z_start"] = layers_df["z_end"] + layers_df["height"]
+    
+    z_const = cumsum_height.iloc[-1]
+    z = np.clip(z, -z_const, 0.0)
+
+    # 4. Clean Physical Geometry (Top-Down)
+    # Fully physical: The source width remains strictly the physical conductor width (100 µm).
+    # The 2D geometric spreading is natively handled by using absolute distances from z=0.
+    layers_df["w_eff_top"] = w
+    layers_df["w_eff_bottom"] = w
+
+    # 5. Unified 2D Temperature Calculation (Bottom-Up Integration)
+    T = T_iso
+    layers_reversed = layers_df.iloc[::-1]
+    
+    for _, row in layers_reversed.iterrows():
+        z_s = row["z_start"]   
+        z_e = row["z_end"]     
+        w_layer = row["w_eff_top"]  # Always the physical width (100 µm)
+        k_sub = row["thermal_conductivity"]
+        
+        # Determine active depth boundaries for this layer relative to target z
+        overlap_bottom = z_e
+        overlap_top = min(z_s, z)
+        
+        if overlap_top > overlap_bottom:
+            # CRITICAL FIX: Measure distances absolutely from the real source at z=0.
+            # Do NOT subtract z_s. This preserves the true continuous 2D fluid shape.
+            z_rel_top = overlap_top
+            z_rel_bottom = overlap_bottom
+            
+            # Primary source contribution (r1 equivalent)
+            int_r1_top = strip_source_integral(y, z_rel_top, w_layer)
+            int_r1_bottom = strip_source_integral(y, z_rel_bottom, w_layer)
+            
+            # Mirrored source contribution across the bottom isothermal boundary (z_const)
+            # The mirror plane is at -2.0 * z_const relative to the real origin z=0
+            z_mirror = -2.0 * z_const
+            int_r2_top = strip_source_integral(y, overlap_top - z_mirror, w_layer)
+            int_r2_bottom = strip_source_integral(y, overlap_bottom - z_mirror, w_layer)
+            
+            delta_integral_r1 = int_r1_bottom - int_r1_top
+            delta_integral_r2 = int_r2_top - int_r2_bottom
+            
+            # Add scaled 2D temperature contribution based purely on local k_sub
+            T += (power_per_length / (np.pi * k_sub * w_layer)) * (delta_integral_r1 + delta_integral_r2)
+            
+        # Terminate loop once the target depth z has been processed
+        if z_e <= z <= z_s:
+            break
+            
+    return T
