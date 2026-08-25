@@ -92,17 +92,19 @@ def biot_savart_rectangular_conductor(
     Calculates the magnetic field of a straight, rectangular cross-section 
     conductor by approximating it as a grid of thin parallel filaments.
     
-    Parameters:
-    -----------
-    pos :           Observation point (x, y, z)
-    R_con :         List of two points defining the conductor's axis
-    I :             Total current flowing through the conductor
-    isclose_tol :   Tolerance for the underlying filament function
+    Args:
+        pos (tuple[float, float, float])            : Observation point (x, y, z)
+        R_con (list[tuple[float, float, float]])    : List of two points defining the conductor's axis (centerline of the conductor)
+        I (float)                                   : Total current flowing through the conductor
+        isclose_tol (float)                         : Tolerance for the underlying filament function
 
-    width_vec :     Vector defining the width direction and full width dimension
-    height_vec :    Vector defining the height direction and full height dimension
-    num_w :         Number of filaments along the width axis
-    num_h :         Number of filaments along the height axis
+        width_vec (tuple[float, float, float])      : Vector defining the width direction and full width dimension (width of the conductor is the length of this vector)
+        height_vec (tuple[float, float, float])     : Vector defining the height direction and full height dimension (height of the conductor is the length of this vector)
+        num_w (int)                                 : Number of filaments along the width axis
+        num_h (int)                                 : Number of filaments along the height axis
+
+    Returns:
+        tuple[float, float, float]: The total magnetic field components (Bx, By, Bz) at the observation point.
     """
     # Convert inputs to numpy arrays
     w_dir = np.array(width_vec)

@@ -30,7 +30,7 @@ FONTSIZE = 12           # in pt, of the latex document
 TEXTWIDTH = 455.24411   # in pt, of the latex document
 TEXTHEIGHT = 535.6748   # in pt, of the latex document
 
-MARKERSIZE = 20         # of the plot markers
+MARKERSIZE = 15         # of the plot markers
 TITLECOLOR = (0 / 255, 51 / 255, 102 / 255) # color of the title = FAU-Blau
 
 ##############################################################################
@@ -49,7 +49,7 @@ plt.rcParams.update({
     "text.usetex": True,
     "font.family": "sans-serif",
     "font.serif": ["Latin Modern Roman"], 
-    "text.latex.preamble": r"\usepackage{amsmath} \usepackage{lmodern} \usepackage{upgreek} \usepackage{xfrac} \usepackage{bm}",
+    "text.latex.preamble": r"\usepackage{amsmath} \usepackage{lmodern} \usepackage{upgreek} \usepackage{xfrac} \usepackage{bm} \usepackage{csquotes}",
 })
 
 plt.rcParams.update({
@@ -66,9 +66,14 @@ plt.rcParams.update({
 ##############################################################################
 ##############################################################################
 
-def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplots: tuple = (1, 1)):
+def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplots: tuple = (1, 1)) -> tuple[float, float]:
     """
     Calculates the exact figure size in inches based on LaTeX textwidth.
+
+    Args:
+        fraction (float): Fraction of the LaTeX textwidth to use for the figure width. Default is 1.0 (full width).
+        width_pt (float): Width of the LaTeX textwidth in points. Default is TEXTWIDTH.
+        subplots (tuple): A tuple specifying the number of rows and columns of subplots. Default is (1, 1).
     """
     # 1. pt to inch conversion factor
     inches_per_pt = 1 / 72.27
@@ -97,10 +102,11 @@ def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
     fig.savefig(
         str(path)+".pdf",
         bbox_inches='tight',
+        dpi=300, # set the resolution for "rasterized" elements (i.e. scatter-points) in the figure
         backend='pdf',
         )
-    plt.show()
-    # plt.close(fig)  # Close the figure after saving to free up memory
+    # plt.show()
+    plt.close(fig)  # Close the figure after saving to free up memory
 
 ##############################################################################
 ##############################################################################
