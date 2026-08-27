@@ -322,113 +322,6 @@ def strip_source_integral(y: float, z_rel: float, w: float) -> float:
 
 ##############################################################################
 
-def temp_est_refraction_spreading(
-    df: pd.DataFrame,
-    power_per_length: float,
-    z: float = 0.0,
-    y: float = 0.0,
-    T_iso: float = 293.15,
-) -> float:
-    """
-    Estimate the temperature at a given point in space due to heat dissipation
-    from a rectangular conductor using a combined 1D/2D analytical approach,
-    while integrating the finite-width strip source contributions and 
-    calculating the spreading of the heat flux by thermal refraction due to the change in thermal conductivity.
-    
-    Args:
-        df (pd.DataFrame):          DataFrame containing the layer properties.
-        power_per_length (float):   Heating power in W/m (P/l).
-        z (float):                  Distance from the conductor along the z-axis (must be <= 0).
-        y (float):                  Distance from the conductor along the y-axis.
-        T_iso (float):              Isothermal temperature in K (default: 293.15 K).
-    """
-    
-    # 1. Identify conductor properties
-    cond_mask = df["name"] == "conductor"
-    w = float(df.loc[cond_mask, "width"].iloc[0])
-    
-    # 2. Filter out conductor
-    layers_df = df[~cond_mask].copy().reset_index(drop=True)
-
-    # 3. Calculate negative z-boundaries
-    cumsum_height = layers_df["height"].cumsum()
-    layers_df["z_end"] = -cumsum_height
-    layers_df["z_start"] = layers_df["z_end"] + layers_df["height"]
-    
-    z_const = cumsum_height.iloc[-1]
-    z = np.clip(z, -z_const, 0.0)
-
-    # 4. Top-Down Width Inheritance via Thermal Refraction Law
-    # The bottom-most layer (substrate) serves as the isotropic 45-degree reference (sf=1.0)
-    k_substrate = float(layers_df["thermal_conductivity"].iloc[-1])
-    
-    layers_df["w_eff_top"] = 0.0
-    layers_df["w_eff_bottom"] = 0.0
-    
-    current_w_eff = w  
-    
-    for idx, row in layers_df.iterrows():
-        z_s = row["z_start"]
-        z_e = row["z_end"]
-        h = row["height"]
-        k_layer = row["thermal_conductivity"]
-        
-        # Physics-driven spreading factor via flux line refraction
-        sf = 1.0 * (k_layer / k_substrate)
-        
-        layers_df.at[idx, "w_eff_top"] = current_w_eff
-        
-        # Virtual footprint expands based on the localized material constriction
-        w_eff_bottom = current_w_eff + 2.0 * h * sf
-        layers_df.at[idx, "w_eff_bottom"] = w_eff_bottom
-        
-        current_w_eff = w_eff_bottom
-
-    # 5. Unified 2D Temperature Calculation (Bottom-Up Local Integration)
-    T = T_iso
-    layers_reversed = layers_df.iloc[::-1]
-    
-    for _, row in layers_reversed.iterrows():
-        z_s = row["z_start"]   
-        z_e = row["z_end"]     
-        w_top = row["w_eff_top"]
-        w_bot = row["w_eff_bottom"]
-        k_sub = row["thermal_conductivity"]
-        
-        # Determine active depth boundaries for this layer relative to target z
-        overlap_bottom = z_e
-        overlap_top = min(z_s, z)
-        
-        if overlap_top > overlap_bottom:
-            # Represent the continuous expansion via its mean effective width
-            w_layer_eff = 0.5 * (w_top + w_bot)
-            
-            # Localized coordinate tracking: Relative distances to the layer top (z_s)
-            z_rel_top = overlap_top - z_s
-            z_rel_bottom = overlap_bottom - z_s
-            
-            # Primary virtual source contribution (r1 equivalent)
-            int_r1_top = strip_source_integral(y, z_rel_top, w_layer_eff)
-            int_r1_bottom = strip_source_integral(y, z_rel_bottom, w_layer_eff)
-            
-            # Mirrored source contribution across the bottom isothermal boundary
-            z_mirror = -2.0 * z_const - z_s
-            int_r2_top = strip_source_integral(y, overlap_top - z_mirror, w_layer_eff)
-            int_r2_bottom = strip_source_integral(y, overlap_bottom - z_mirror, w_layer_eff)
-            
-            delta_integral_r1 = int_r1_bottom - int_r1_top
-            delta_integral_r2 = int_r2_top - int_r2_bottom
-            
-            # Add scaled temperature contribution using the local virtual footprint width
-            T += (power_per_length / (np.pi * k_sub * w_layer_eff)) * (delta_integral_r1 + delta_integral_r2)
-            
-        if z_e <= z <= z_s:
-            break
-            
-    return T
-
-##############################################################################
-
 def temp_est_integration_spreading(
     df: pd.DataFrame,               # DataFrame with the layer data
     power_per_length: float,        # Heating power in W/m (P/l)
@@ -512,3 +405,158 @@ def temp_est_integration_spreading(
             break
             
     return T
+
+##############################################################################
+
+
+def temp_est_split_framework(
+    df: pd.DataFrame, 
+    power_per_length: float, 
+    z: float = 0.0, 
+    y: float = 0.0, 
+    T_iso: float = 293.15
+) -> float:
+    """
+    Estimate the temperature at a given point in space due to heat dissipation from a rectangular conductor.
+    The last layer is treated as a 2D layer, while all layers above it are treated as 1D layers.
+    """
+    # 1. Leiterbahn filtern und Breite extrahieren
+    cond_mask = df["name"] == "conductor"
+    # KORREKTUR: .iloc[0] statt .iloc nutzen und explizit casten
+    w = float(df.loc[cond_mask, "width"].iloc[0]) 
+    
+    layers_df = df[~cond_mask].copy().reset_index(drop=True)
+    
+    # Geometrische Höhen akkumulieren
+    cumsum_height = layers_df["height"].cumsum()
+    layers_df["z_end"] = -cumsum_height
+    layers_df["z_start"] = layers_df["z_end"] + layers_df["height"]
+    
+    # Übergangsgrenze (Oberkante der alleruntersten Schicht)
+    bottom_layer_name = str(layers_df["name"].iloc[-1])
+    bottom_mask = layers_df["name"] == bottom_layer_name
+    z_transition = float(layers_df.loc[bottom_mask, "z_start"].iloc[0])
+    
+    # 2. FALL A: Zielpunkt z liegt direkt in der untersten 2D-Schicht
+    if z <= z_transition:
+        cond_row = df[cond_mask]
+        bottom_layer_row = df[~cond_mask].iloc[[-1]]
+        sub_df = pd.concat([cond_row, bottom_layer_row]).reset_index(drop=True)
+        
+        return temp_est_integration_spreading(sub_df, power_per_length, z, y, T_iso)
+        
+    # 3. FALL B: Zielpunkt z liegt in den oberen 1D-Schichten
+    else:
+        cond_row = df[cond_mask]
+        bottom_layer_row = df[~cond_mask].iloc[[-1]]
+        sub_df = pd.concat([cond_row, bottom_layer_row]).reset_index(drop=True)
+        
+        T_transition = temp_est_integration_spreading(sub_df, power_per_length, z_transition, y, T_iso)
+        
+        T = T_transition
+        upper_layers = layers_df.iloc[:-1]
+        
+        for _, row in upper_layers.iterrows():
+            # KORREKTUR: Werte aus der iterrows-Schleife explizit casten
+            row_z_end = float(row["z_end"])
+            row_z_start = float(row["z_start"])
+            row_k = float(row["thermal_conductivity"])
+            
+            overlap_bottom = max(z_transition, row_z_end)
+            overlap_top = min(z, row_z_start)
+            
+            if overlap_top > overlap_bottom:
+                thickness_active = overlap_top - overlap_bottom
+                T += power_per_length * (thickness_active / (row_k * w))
+                
+        return T
+
+##############################################################################
+
+
+def temp_est_split_framework_merged(
+    df: pd.DataFrame, 
+    power_per_length: float, 
+    z: float = 0.0, 
+    y: float = 0.0, 
+    T_iso: float = 293.15
+) -> float:
+    """
+    Verschmilzt direkt übereinanderliegende Schichten mit identischer Leitfähigkeit und Breite.
+    Nutzt das originale temp_est_integration_spreading() für den verbleibenden, 
+    zusammenhängenden 2D-Bodenblock und rechnet darüber rein linear in 1D.
+    """
+    # 1. Conductor isolieren
+    cond_mask = df["name"] == "conductor"
+    w = float(df.loc[cond_mask, "width"].iloc[0]) 
+    
+    # Reine Materialschichten extrahieren
+    layers_df = df[~cond_mask].copy().reset_index(drop=True)
+    
+    # 2. VERSCHMELZUNGS-LOGIK (Adjacent Layer Merging)
+    # Ein Block wechselt, wenn sich Leitfähigkeit ODER Breite zum vorherigen Element ändern
+    cond_change = layers_df["thermal_conductivity"] != layers_df["thermal_conductivity"].shift()
+    width_change = layers_df["width"] != layers_df["width"].shift()
+    
+    # Kumulative Summe erzeugt eine eindeutige ID für jeden zusammenhängenden Block
+    layers_df["block_id"] = (cond_change | width_change).cumsum()
+    
+    # Schichten aggregieren: Höhen addieren, Eigenschaften beibehalten (da identisch)
+    # Wir nehmen "name" des jeweils ersten Schichtelements im Block
+    merged_layers = layers_df.groupby("block_id").agg({
+        "name": "first",
+        "height": "sum",
+        "thermal_conductivity": "first",
+        "width": "first"
+    }).reset_index(drop=True)
+    
+    # 3. Geometrische Höhen auf dem verschmolzenen DataFrame neu berechnen
+    cumsum_height = merged_layers["height"].cumsum()
+    merged_layers["z_end"] = -cumsum_height
+    merged_layers["z_start"] = merged_layers["z_end"] + merged_layers["height"]
+    
+    # Dynamisch den Namen der untersten (jetzt verschmolzenen) Bodenschicht holen
+    bottom_layer_name = str(merged_layers["name"].iloc[-1])
+    bottom_mask = merged_layers["name"] == bottom_layer_name
+    
+    # z_transition ist die Oberkante des gesamten zusammenhängenden 2D-Bodenblocks
+    z_transition = float(merged_layers.loc[bottom_mask, "z_start"].iloc[0])
+    
+    # 4. Rekonstruktion des Sub-DFs für die originale 2D-Funktion
+    # Wir filtern beide Zeilen strikt auf die für die Berechnung relevanten Kernspalten
+    core_columns = ["name", "height", "width", "thermal_conductivity"]
+    
+    cond_row_clean = df.loc[cond_mask, core_columns]
+    bottom_merged_row_clean = merged_layers.iloc[[-1]][core_columns]
+    
+    # Sicherer Concat ohne Gefahr von KeyErrors durch Zusatzspalten
+    sub_df_2d = pd.concat([cond_row_clean, bottom_merged_row_clean]).reset_index(drop=True)
+    
+    # 5. FALL A: Zielpunkt z liegt direkt im verschmolzenen 2D-Bodenblock
+    if z <= z_transition:
+        return temp_est_integration_spreading(sub_df_2d, power_per_length, z, y, T_iso)
+
+    # 6. FALL B: Zielpunkt z liegt in den oberen 1D-Kanälen
+    else:
+        # Temperatur an der neuen, nach oben verschobenen Blockgrenze berechnen
+        T_transition = temp_est_integration_spreading(sub_df_2d, power_per_length, z_transition, y, T_iso)
+        
+        T = T_transition
+        # Alle verschmolzenen Schichten oberhalb des Bodenblocks durchlaufen
+        upper_layers = merged_layers.iloc[:-1]
+        
+        for _, row in upper_layers.iterrows():
+            row_z_end = float(row["z_end"])
+            row_z_start = float(row["z_start"])
+            row_k = float(row["thermal_conductivity"])
+            row_w = float(row["width"])  # Nutzt die reale Breite des oberen Kanals
+            
+            overlap_bottom = max(z_transition, row_z_end)
+            overlap_top = min(z, row_z_start)
+            
+            if overlap_top > overlap_bottom:
+                thickness_active = overlap_top - overlap_bottom
+                # 1D-Kanalwärmeleitung basierend auf der jeweiligen Kanalbreite (row_w)
+                T += power_per_length * (thickness_active / (row_k * row_w))
+                
+        return T

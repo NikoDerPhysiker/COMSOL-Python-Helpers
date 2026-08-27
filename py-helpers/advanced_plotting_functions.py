@@ -105,8 +105,8 @@ def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
         dpi=300, # set the resolution for "rasterized" elements (i.e. scatter-points) in the figure
         backend='pdf',
         )
-    # plt.show()
-    plt.close(fig)  # Close the figure after saving to free up memory
+    plt.show()
+    # plt.close(fig)  # Close the figure after saving to free up memory
 
 ##############################################################################
 ##############################################################################
@@ -321,7 +321,7 @@ def get_formula_unit(string: str) -> tuple[str, str]:
 
 ##############################################################################
 
-def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | None = None) -> str:
+def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | None = None, bm: bool = False) -> str:
     """
     Translates the variable in the label using the provided translation dictionary and applies SI prefix notation.
 
@@ -333,7 +333,7 @@ def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | No
     Args:
         label (str):    The input label string, expected to be in the format "variable = value [unit]".
         translation_dict (dict[str, str] | None): A dictionary for translating variable names. Default is None.
-
+        bm (bool): Whether to use bold math notation for the label. Default is False.
     Returns:
         str: The translated and prefixed label.
     """
@@ -360,7 +360,7 @@ def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | No
         rest = f"{rest} [{unit}]"
 
     short_label = f"{short} = {rest}"
-    return set_prefix_in_number_unit_string(short_label)
+    return set_prefix_in_number_unit_string(short_label, bm=bm)
 
 
 ##############################################################################
@@ -453,11 +453,13 @@ def plot_background(
         if xstyle == 'prefix':
             fig, ax, xprefix, xexponent = prefixes_notation(fig, ax, 'x')
         else:
+            ax.xaxis.set_major_formatter(ticker.ScalarFormatter())
             ax.ticklabel_format(axis='x', style= xstyle, scilimits=(0,0), useMathText=True)
     if ystyle is not None:
         if ystyle == 'prefix':
             fig, ax, yprefix, yexponent = prefixes_notation(fig, ax, 'y')
         else:
+            ax.yaxis.set_major_formatter(ticker.ScalarFormatter())
             ax.ticklabel_format(axis='y', style=ystyle, scilimits=(0,0), useMathText=True)
 
     # get current label if not provided
