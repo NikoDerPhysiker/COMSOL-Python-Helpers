@@ -244,7 +244,7 @@ def get_voltage_sweep_dict(
 
         # 2. Simulate grid voltages
         v_terminals = calculate_grid_voltages(
-            z_target=1e-3,
+            z_target=3e-6,
             B_goal=b_goal,
             conductor_grid_length=conductor_grid_length,
             conductor_grid_width=2e-6,

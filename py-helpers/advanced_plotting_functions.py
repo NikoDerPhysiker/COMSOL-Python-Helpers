@@ -8,15 +8,23 @@
 import math
 import re
 
+import pandas as pd
+
 # for plotting
 import matplotlib
 import matplotlib.pyplot as plt
 from matplotlib import ticker
+from matplotlib.collections import PathCollection
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 # for type hinting
-from typing import Literal
+from typing import Literal, cast
+
 import matplotlib.axes
 import matplotlib.figure
+from matplotlib.markers import MarkerStyle
+from matplotlib.backends.backend_agg import FigureCanvasAgg
+
 from pathlib import Path
 
 
@@ -28,9 +36,9 @@ from pathlib import Path
 
 FONTSIZE = 12           # in pt, of the latex document
 TEXTWIDTH = 455.24411   # in pt, of the latex document
-TEXTHEIGHT = 535.6748   # in pt, of the latex document
+TEXTHEIGHT = 635.25946  # in pt, of the latex document
 
-MARKERSIZE = 15         # of the plot markers
+MARKERSIZE = 5         # of the plot markers
 TITLECOLOR = (0 / 255, 51 / 255, 102 / 255) # color of the title = FAU-Blau
 
 ##############################################################################
@@ -62,52 +70,7 @@ plt.rcParams.update({
 
 ##############################################################################
 ##############################################################################
-# new features
-##############################################################################
-##############################################################################
-
-def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplots: tuple = (1, 1)) -> tuple[float, float]:
-    """
-    Calculates the exact figure size in inches based on LaTeX textwidth.
-
-    Args:
-        fraction (float): Fraction of the LaTeX textwidth to use for the figure width. Default is 1.0 (full width).
-        width_pt (float): Width of the LaTeX textwidth in points. Default is TEXTWIDTH.
-        subplots (tuple): A tuple specifying the number of rows and columns of subplots. Default is (1, 1).
-    """
-    # 1. pt to inch conversion factor
-    inches_per_pt = 1 / 72.27
-    
-    # 2. figure width in inches
-    fig_width_in = width_pt * inches_per_pt * fraction
-
-    # 3. golden ratio for the height (aesthetically pleasing standard ratio)
-    golden_ratio = (5**0.5 - 1) / 2
-    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
-
-    return fig_width_in, fig_height_in
-    
-
-
-def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
-    """
-    Saves the given figure to a PDF file in the specified output folder.
-    
-    Args:
-        fig (matplotlib.figure.Figure): The matplotlib figure object to save.
-        path (Path | str): The path where the figure will be saved.
-        fraction (float): The fraction of the page width to use for the figure.
-        subplots (tuple): The number of rows and columns of subplots.
-    """
-    fig.savefig(
-        str(path)+".pdf",
-        bbox_inches='tight',
-        dpi=300, # set the resolution for "rasterized" elements (i.e. scatter-points) in the figure
-        backend='pdf',
-        )
-    plt.show()
-    # plt.close(fig)  # Close the figure after saving to free up memory
-
+# string formaters
 ##############################################################################
 ##############################################################################
 
@@ -269,9 +232,6 @@ def set_prefix_in_number_unit_string(string: str, bm: bool = False) -> str:
             
     return string
 
-
-
-
 ##############################################################################
 ##############################################################################
 
@@ -366,6 +326,30 @@ def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | No
 ##############################################################################
 ##############################################################################
 # plotting helper
+##############################################################################
+##############################################################################
+
+def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplots: tuple = (1, 1)) -> tuple[float, float]:
+    """
+    Calculates the exact figure size in inches based on LaTeX textwidth.
+
+    Args:
+        fraction (float): Fraction of the LaTeX textwidth to use for the figure width. Default is 1.0 (full width).
+        width_pt (float): Width of the LaTeX textwidth in points. Default is TEXTWIDTH.
+        subplots (tuple): A tuple specifying the number of rows and columns of subplots. Default is (1, 1).
+    """
+    # 1. pt to inch conversion factor
+    inches_per_pt = 1 / 72.27
+    
+    # 2. figure width in inches
+    fig_width_in = width_pt * inches_per_pt * fraction
+
+    # 3. golden ratio for the height (aesthetically pleasing standard ratio)
+    golden_ratio = (5**0.5 - 1) / 2
+    fig_height_in = fig_width_in * golden_ratio * (subplots[0] / subplots[1])
+
+    return fig_width_in, fig_height_in
+
 ##############################################################################
 ##############################################################################
 
@@ -491,7 +475,7 @@ def plot_background(
             main_title = title
             subtitle = ""
 
-        ax.set_title(rf"\textbf{{{main_title}}}"+"\n"+rf"{{{subtitle}}}", color=TITLECOLOR, pad=20)
+        ax.set_title(rf"\textbf{{{main_title}}}"+"\n\n"+rf"{{{subtitle}}}", color=TITLECOLOR, pad=20)
 
     ax.set_axisbelow(True)  # Ensure grid is below other plot elements
     ax.grid(True, which='both', linestyle='--', zorder=0)
@@ -501,3 +485,313 @@ def plot_background(
 ##############################################################################
 ##############################################################################
 
+def dynamic_legend(
+    fig: matplotlib.figure.Figure,
+    ax: matplotlib.axes.Axes,
+    fraction: float = 1.0,
+    width_tolerance: float = 1.10,
+):
+    """
+    Creates a dynamic legend for a matplotlib plot, adjusting the number of columns based on the plot width and number of legend entries (even or odd).
+    It also sorts the legend entries: If scatter and line plots alternate, placing scatter entries on the left and line entries on the right.
+
+    Args:
+        fig (matplotlib.figure.Figure):     The matplotlib figure object.
+        ax (matplotlib.axes.Axes):          The matplotlib axes object.
+        fraction (float):                   Fraction of the page width to use for the legend. Default is 1.0 (full width).
+        width_tolerance (float):            Tolerance factor for the maximum allowed legend width relative to the figure width. Default is 1.10.
+    
+    Returns:
+        tuple (Figure, Axes): A tuple containing the updated matplotlib figure and axes objects.
+    """
+    # 1. Handles und Labels extrahieren
+    handles, labels = ax.get_legend_handles_labels()
+    n_entries = len(handles)
+
+    if n_entries == 0:
+        return fig, ax
+
+    # 2. Regel 3: Sortierung nach Typ (Scatter links, Lines rechts), falls abwechselnd
+    is_scatter = [isinstance(h, PathCollection) for h in handles]
+
+    is_alternating = False
+    if n_entries >= 2:
+        is_alternating = all(is_scatter[i] != is_scatter[i + 1] for i in range(n_entries - 1))
+
+    if is_alternating:
+        scatter_items = [(h, l) for h, l, s in zip(handles, labels, is_scatter) if s]
+        line_items = [(h, l) for h, l, s in zip(handles, labels, is_scatter) if not s]
+
+        sorted_items = scatter_items + line_items
+        handles = [item[0] for item in sorted_items]
+        labels = [item[1] for item in sorted_items]
+
+    # 3. Regel 1: Start-Spaltenanzahl passend zur Paritaet von n_entries waehlen
+    ncol_start = 2 if n_entries % 2 == 0 else 1
+
+    # "Plotbreite" = Gesamtbreite der Figure inkl. Achsenbeschriftung etc.
+    fig_width_pts = fig.get_size_inches()[0] * 72
+    allowed_max_width_pts = fig_width_pts * width_tolerance
+
+    # Vorhandene Legende entfernen, damit sie die Messung nicht verfaelscht
+    existing_legend = ax.get_legend()
+    if existing_legend is not None:
+        existing_legend.remove()
+
+    # 4. Regel 2: Fuer jede erlaubte (paritaetskonforme) Spaltenanzahl die
+    # Legende probeweise rendern und die tatsaechliche Breite messen
+    optimal_ncol = ncol_start
+    for test_ncol in range(ncol_start, n_entries + 1, 2):
+        trial_legend = ax.legend(
+            handles=handles,
+            labels=labels,
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.15 / fraction),
+            ncol=test_ncol,
+        )
+        fig.canvas.draw()
+        # fig.canvas ist zur Laufzeit ein Agg-basierter Canvas (Agg, TkAgg,
+        # Qt5Agg, ...); FigureCanvasBase selbst deklariert get_renderer()
+        # nicht, daher der cast fuer den Type Checker.
+        renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+        legend_width_pts = trial_legend.get_window_extent(renderer).width / fig.dpi * 72
+        trial_legend.remove()
+
+        if legend_width_pts <= allowed_max_width_pts:
+            optimal_ncol = test_ncol
+        else:
+            break
+
+    # 5. Finale Legende setzen
+    ax.legend(
+        handles=handles,
+        labels=labels,
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.15 / fraction),
+        ncol=optimal_ncol,
+    )
+
+    return fig, ax
+
+##############################################################################
+##############################################################################
+
+def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
+    """
+    Saves the given figure to a PDF file in the specified output folder.
+    
+    Args:
+        fig (matplotlib.figure.Figure): The matplotlib figure object to save.
+        path (Path | str): The path where the figure will be saved.
+        fraction (float): The fraction of the page width to use for the figure.
+        subplots (tuple): The number of rows and columns of subplots.
+    """
+    fig.savefig(
+        str(path)+".pdf",
+        bbox_inches='tight',
+        dpi=300, # set the resolution for "rasterized" elements (i.e. scatter-points) in the figure
+        backend='pdf',
+        )
+    plt.show()
+    # plt.close(fig)  # Close the figure after saving to free up memory
+
+##############################################################################
+##############################################################################
+
+def standard_scatter_plot(
+        # plotting data
+        x: list[float],
+        y: list[float],
+        z: list[float] | None = None,
+
+        label: str | None = None,
+        color: tuple[float, float, float] |str | None = TITLECOLOR,
+        markersize: float = MARKERSIZE,
+        translation_dict: dict[str, str] | None = None,
+
+        # Figure and Axes
+        fraction_textwidth: float = 1.0,
+        fig: matplotlib.figure.Figure | None = None, 
+        ax: matplotlib.axes.Axes | None = None,
+
+        # labels and title
+        title: str | None = None,
+        x_label: str | None = None, 
+        y_label: str | None = None,
+        z_label: str | None = None,
+
+        xstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
+        ystyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
+        zstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'prefix',
+    ):
+    """
+    Create a standard scatter plot.
+    Args:
+        x (list[float])                             : x data
+        y (list[float])                             : y data
+        z (list[float] | None)                      : z data for color mapping (optional)
+        label (str | None)                          : label for the data points (optional)
+        color (str | None)                          : color for the data points (optional, ignored if z is provided)
+        translation_dict (dict[str, str] | None)    : dictionary for translating labels (optional)
+
+        fraction_textwidth (float)              : fraction of text width for figure size
+        fig (matplotlib.figure.Figure | None)   : existing figure to plot on (optional)
+        ax (matplotlib.axes.Axes | None)        : existing axes to plot on (optional)
+
+        title (str | None)      : title of the plot (optional)
+        x_label (str | None)    : label for the x-axis (optional)
+        y_label (str | None)    : label for the y-axis (optional)
+        z_label (str | None)    : label for the colorbar (optional, only used if z is provided)
+
+        xstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for x-axis ticks (optional)
+        ystyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for y-axis ticks (optional)
+        zstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for colorbar ticks (optional, only used if z is provided)
+
+    Returns:
+        tuple (Figure, Axes): the figure and axes objects of the plot
+    """
+
+    # create figure and axes if not provided
+    if fig is None or ax is None:
+        fig, ax = get_fig_ax(fraction_textwidth=fraction_textwidth)
+
+    # apply 'prefix' style to label
+    if label is not None:
+        labels = label.split("\n")
+        label = ""
+        for l in labels: 
+            labelpart = translate_and_prefix_label(l, translation_dict)
+            label += labelpart + "\n"
+        label = label.rstrip("\n")
+
+    
+    # plot
+    if z is None:
+        # mean y for multiple y values with same x
+        if len(x) == len(y):
+            unique_x = sorted(set(x))
+            mean_y = [sum(y[i] for i in range(len(x)) if x[i] == ux) / sum(1 for i in range(len(x)) if x[i] == ux) for ux in unique_x]
+            x = unique_x
+            y = mean_y
+        ax.scatter(x, y, label=label, color=color, s=markersize, marker=MarkerStyle('o'), rasterized=True)
+    else:
+        img = ax.scatter(x, y, c=z, cmap='viridis', label=label, s=markersize, marker=MarkerStyle('o'), rasterized=True)
+
+        divider = make_axes_locatable(ax)
+        # size="5%" bestimmt die Breite der Colorbar, pad=0.15 den Abstand zum Hauptplot
+        cax = divider.append_axes("right", size="5%", pad=0.15)
+        cbar = fig.colorbar(img, cax=cax)
+
+        if translation_dict is not None and z_label is not None and z_label in translation_dict:
+            z_label = translation_dict[z_label]
+
+        zprefix = None
+        if zstyle is not None:
+            if zstyle == 'prefix':
+                z_abs_max = max(abs(z_val) for z_val in z)
+                zprefix, zsi_exponent, zexponent = get_SI_prefix((z_abs_max, z_abs_max))
+                z_scale_factor = 10 ** (-zsi_exponent)
+                cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * z_scale_factor:g}"))
+            else:
+                formatter = ticker.ScalarFormatter(useMathText=True)
+                formatter.set_powerlimits((0, 0))
+                cbar.ax.yaxis.set_major_formatter(formatter)
+                cbar.ax.ticklabel_format(axis='y', style= zstyle, useMathText=True)
+    
+        if zstyle == 'prefix' and z_label is not None:
+            if zprefix is not None:
+                z_label = set_prefix_in_label(string = z_label, prefix = zprefix)
+            cbar.set_label(z_label, rotation=270, labelpad=20 + 2*FONTSIZE,)
+
+    # translate labels if translation_dict is provided
+    if translation_dict is not None:
+        if x_label is not None and x_label in translation_dict:
+            x_label = translation_dict[x_label]
+        if y_label is not None and y_label in translation_dict:
+            y_label = translation_dict[y_label]
+
+    if z is not None:
+        # increase the height of the figure to match the aspect ratio of the data
+        x_min, x_max = ax.get_xlim()
+        y_min, y_max = ax.get_ylim()
+        data_aspect_ratio = abs(y_max - y_min) / abs(x_max - x_min)
+
+        # get the current figure width in inches
+        fig = ax.get_figure()
+        breite, _ = fig.get_size_inches()
+
+        # set the height of the figure based on the data aspect ratio
+        fig.set_size_inches(breite, breite * data_aspect_ratio)
+        ax.set_aspect('equal', adjustable='box')
+
+        # set equal locator (ticks) for x and y axes
+        equal_locator = ticker.AutoLocator()
+        ax.xaxis.set_major_locator(equal_locator)
+        ax.yaxis.set_major_locator(equal_locator)
+
+    # set background
+    fig, ax = plot_background(fig, ax, 
+                                  title=title, 
+                                  x_label=x_label, 
+                                  y_label=y_label,
+                                  xstyle = xstyle,
+                                  ystyle = ystyle,
+                                  )
+
+    if label is not None:
+        dynamic_legend(fig, ax, fraction=fraction_textwidth)
+
+    return fig, ax
+
+##############################################################################
+
+def standard_scatter_plot_df(
+    df: pd.DataFrame,
+    x: str,
+    y: str,
+    z: str | None = None,
+    **kwargs 
+):
+    """
+    uses 'standard_scatter_plot()' to plot data from a pandas DataFrame.
+    Args:
+        df (pd.DataFrame): The DataFrame containing the data to plot.
+        x (str): The column name in the DataFrame for the x-axis data.
+        y (str): The column name in the DataFrame for the y-axis data.
+        z (str | None): The column name in the DataFrame for the z-axis data (optional).
+        **kwargs: Additional keyword arguments to pass to standard_scatter_plot().
+            - label (str | None); label for the data points (optional)
+            - color (str | None); color for the data points (optional, ignored if z is provided)
+            - translation_dict (dict[str, str] | None); dictionary for translating labels (optional)
+    
+            - fraction_textwidth (float); fraction of text width for figure size
+            - fig (matplotlib.figure.Figure | None); existing figure to plot on (optional)
+            - ax (matplotlib.axes.Axes | None); existing axes to plot on (optional)
+    
+            - title (str | None); title of the plot (optional)
+            - x_label (str | None); label for the x-axis (optional)
+            - y_label (str | None); label for the y-axis (optional)
+            - z_label (str | None); label for the colorbar (optional, only used if z is provided)
+    
+            - xstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None); style for x-axis ticks (optional)
+            - ystyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None); style for y-axis ticks (optional)
+            - zstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None); style for colorbar ticks (optional, only used if z is provided)
+    
+        Returns:
+            tuple (Figure, Axes): the figure and axes objects of the plot
+    """
+    # convert the specified columns to float and then to lists
+    x_data = df[x].astype(float).tolist()
+    y_data = df[y].astype(float).tolist()
+    z_data = df[z].astype(float).tolist() if z is not None else None
+
+    # pass data and additional arguments to standard_scatter_plot()
+    return standard_scatter_plot(
+        x=x_data,
+        y=y_data,
+        z=z_data,
+        **kwargs
+    )
+
+##############################################################################
+##############################################################################

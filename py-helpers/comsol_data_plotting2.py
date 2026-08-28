@@ -12,7 +12,6 @@ import pandas as pd
 import numpy as np
 
 import matplotlib as mpl
-from matplotlib import ticker
 
 from pathlib import Path
 import importlib
@@ -29,173 +28,9 @@ import comsol_data_import as cdi
 _ = importlib.reload(cdi)
 
 # for type hints
-from typing import Literal, Callable
+from typing import Callable
 import matplotlib.figure
 import matplotlib.axes
-from matplotlib.markers import MarkerStyle
-
-
-##############################################################################
-##############################################################################
-# plotting helpers
-##############################################################################
-##############################################################################
-
-def standard_scatter_plot(
-        # plotting data
-        x: list[float],
-        y: list[float],
-        z: list[float] | None = None,
-
-        label: str | None = None,
-        color: tuple[float, float, float] |str | None = apf.TITLECOLOR,
-        markersize: float = apf.MARKERSIZE,
-        translation_dict: dict[str, str] | None = None,
-
-        # Figure and Axes
-        fraction_textwidth: float = 1.0,
-        fig: matplotlib.figure.Figure | None = None, 
-        ax: matplotlib.axes.Axes | None = None,
-
-        # labels and title
-        title: str | None = None,
-        x_label: str | None = None, 
-        y_label: str | None = None,
-        z_label: str | None = None,
-
-        xstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
-        ystyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'plain',
-        zstyle: Literal['sci', 'scientific', 'plain', 'prefix'] | None = 'prefix',
-    ):
-    """
-    Create a standard scatter plot.
-    Args:
-        x (list[float])                             : x data
-        y (list[float])                             : y data
-        z (list[float] | None)                      : z data for color mapping (optional)
-        label (str | None)                          : label for the data points (optional)
-        color (str | None)                          : color for the data points (optional, ignored if z is provided)
-        translation_dict (dict[str, str] | None)    : dictionary for translating labels (optional)
-
-        fraction_textwidth (float)              : fraction of text width for figure size
-        fig (matplotlib.figure.Figure | None)   : existing figure to plot on (optional)
-        ax (matplotlib.axes.Axes | None)        : existing axes to plot on (optional)
-
-        title (str | None)      : title of the plot (optional)
-        x_label (str | None)    : label for the x-axis (optional)
-        y_label (str | None)    : label for the y-axis (optional)
-        z_label (str | None)    : label for the colorbar (optional, only used if z is provided)
-
-        xstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for x-axis ticks (optional)
-        ystyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for y-axis ticks (optional)
-        zstyle (Literal['sci', 'scientific', 'plain', 'prefix'] | None) : style for colorbar ticks (optional, only used if z is provided)
-
-    Returns:
-        tuple (Figure, Axes): the figure and axes objects of the plot
-    """
-
-    # create figure and axes if not provided
-    if fig is None or ax is None:
-        fig, ax = apf.get_fig_ax(fraction_textwidth=fraction_textwidth)
-
-    # apply 'prefix' style to label
-    if label is not None:
-        labels = label.split("\n")
-        label = ""
-        for l in labels: 
-            labelpart = apf.translate_and_prefix_label(l, translation_dict)
-            label += labelpart + "\n"
-        label = label.rstrip("\n")
-
-    
-    # plot
-    if z is None:
-        # mean y for multiple y values with same x
-        if len(x) == len(y):
-            unique_x = sorted(set(x))
-            mean_y = [sum(y[i] for i in range(len(x)) if x[i] == ux) / sum(1 for i in range(len(x)) if x[i] == ux) for ux in unique_x]
-            x = unique_x
-            y = mean_y
-        ax.scatter(x, y, label=label, color=color, s=markersize, marker=MarkerStyle('o'), rasterized=True)
-    else:
-        img = ax.scatter(x, y, c=z, cmap='viridis', label=label, s=markersize, marker=MarkerStyle('o'), rasterized=True)
-        cbar = fig.colorbar(img, ax=ax)
-
-        if translation_dict is not None and z_label is not None and z_label in translation_dict:
-            z_label = translation_dict[z_label]
-
-        zprefix = None
-        if zstyle is not None:
-            if zstyle == 'prefix':
-                z_abs_max = max(abs(z_val) for z_val in z)
-                zprefix, zsi_exponent, zexponent = apf.get_SI_prefix((z_abs_max, z_abs_max))
-                z_scale_factor = 10 ** (-zsi_exponent)
-                cbar.ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * z_scale_factor:g}"))
-            else:
-                formatter = ticker.ScalarFormatter(useMathText=True)
-                formatter.set_powerlimits((0, 0))
-                cbar.ax.yaxis.set_major_formatter(formatter)
-                cbar.ax.ticklabel_format(axis='y', style= zstyle, useMathText=True)
-    
-        if zstyle == 'prefix' and z_label is not None:
-            if zprefix is not None:
-                z_label = apf.set_prefix_in_label(string = z_label, prefix = zprefix)
-            cbar.set_label(z_label, rotation=270, labelpad=20 + 2*apf.FONTSIZE,)
-
-    # translate labels if translation_dict is provided
-    if translation_dict is not None:
-        if x_label is not None and x_label in translation_dict:
-            x_label = translation_dict[x_label]
-        if y_label is not None and y_label in translation_dict:
-            y_label = translation_dict[y_label]
-
-    # set background
-    fig, ax = apf.plot_background(fig, ax, 
-                                  title=title, 
-                                  x_label=x_label, 
-                                  y_label=y_label,
-                                  xstyle = xstyle,
-                                  ystyle = ystyle,
-                                  )
-
-    if z is not None:
-        ax.set_aspect('equal', adjustable='box')
-
-    if label is not None:
-        ax.legend(loc='best')
-
-    return fig, ax
-
-##############################################################################
-
-def standard_scatter_plot_df(
-    df: pd.DataFrame,
-    x: str,
-    y: str,
-    z: str | None = None,
-    **kwargs 
-):
-    """
-    uses 'standard_scatter_plot()' to plot data from a pandas DataFrame.
-    Args:
-        df (pd.DataFrame): The DataFrame containing the data to plot.
-        x (str): The column name in the DataFrame for the x-axis data.
-        y (str): The column name in the DataFrame for the y-axis data.
-        z (str | None): The column name in the DataFrame for the z-axis data (optional).
-        **kwargs: Additional keyword arguments to pass to standard_scatter_plot().
-    """
-    # convert the specified columns to float and then to lists
-    x_data = df[x].astype(float).tolist()
-    y_data = df[y].astype(float).tolist()
-    z_data = df[z].astype(float).tolist() if z is not None else None
-
-    # pass data and additional arguments to standard_scatter_plot()
-    return standard_scatter_plot(
-        x=x_data,
-        y=y_data,
-        z=z_data,
-        **kwargs
-    )
 
 ##############################################################################
 ##############################################################################
@@ -321,7 +156,7 @@ def add_magnetic_theory_01_00(
 
     theory_name = fr"Biot-Savart (${num_w} \times {num_h}$)"
     if not xparam == "z":
-        z_value_str = r"$\bm{z =" + f" {z_pos}" + r" [\mathrm{m}]}$"
+        z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
         z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
         label = z_value_str + ", " + theory_name
     else:
@@ -421,7 +256,7 @@ def add_temperature_theory_01_00(
         # plot
         theory_name = "Theory: line source approximation"
         if not xparam == "z":
-            z_value_str = r"$\bm{z =" + f" {z_pos}" + r" [\mathrm{m}]}$"
+            z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
             z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
             label = z_value_str + ", " + theory_name
         else:
@@ -453,7 +288,7 @@ def add_temperature_theory_01_00(
         # plot
         theory_name = "Theory: extended source"
         if not xparam == "z":
-            z_value_str = r"$\bm{z =" + f" {z_pos}" + r" [\mathrm{m}]}$"
+            z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
             z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
             label = z_value_str + ", " + theory_name
         else:
@@ -699,7 +534,7 @@ def add_magnetic_theory_02_00(
     
     theory_name = fr"Biot-Savart (${numB_w} \times {numB_h}$)"
     if not xparam == "z":
-        z_value_str = r"$\bm{z =" + f" {z_pos}" + r" [\mathrm{m}]}$"
+        z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
         z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
         label = z_value_str + ", " + theory_name
     else:
@@ -772,14 +607,27 @@ def import_COMSOLTXT_to_df_sweep(iteration: int, input_folder: Path, modelfolder
 
 ##############################################################################
 
-def display_params(params: list[str], df_parameters: pd.DataFrame, translation_dict: dict[str, str], bm: bool = False) -> str:
+def display_params(params: list[str], df_parameters: pd.DataFrame, translation_dict: dict[str, str], bm: bool = False, df_terminals: pd.DataFrame | None = None) -> str:
     label = ""
     for param in params:
-        mask = df_parameters["name"] == param
-        if not mask.any():
-            raise ValueError(f"Parameter '{param}' not found in df_parameters.")
-        value = df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        name = df_parameters.loc[mask, "name"].iloc[0]
+        if param != "V_Grid":
+            mask = df_parameters["name"] == param
+            if not mask.any():
+                raise ValueError(f"Parameter '{param}' not found in df_parameters.")
+            value = df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            name = df_parameters.loc[mask, "name"].iloc[0]
+        else:
+            if df_terminals is None:
+                raise ValueError("df_terminals must be provided when displaying 'V_Grid'.")
+            
+            mask = df_terminals["Terminal"].str.contains("G", na=False)
+            df_grid = df_terminals[mask]
+
+            max_voltage = df_grid["Voltage (V)"].max()
+            min_voltage = df_grid["Voltage (V)"].min()
+
+            value = abs(min_voltage) + abs(max_voltage)
+            name = "V_Grid"
 
         if translation_dict is not None and name in translation_dict:
             name = translation_dict[name]
@@ -895,25 +743,31 @@ def zaxis_plot(
         for midx in range(group_length):
             df_plot = list_df[midx][[xparam, yparam]].copy()
 
-            x_value_str = r"$\bm{x =" + f" {x_value}" + r" [\mathrm{m}]}$"
-            x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=True)
+            x_value_str = r"$x =" + f" {x_value}" + r" [\mathrm{m}]$"
+            x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=False)
 
-            y_value_str = r"$\bm{y =" + f" {y_value}" + r" [\mathrm{m}]}$"
-            y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=True)
+            y_value_str = r"$y =" + f" {y_value}" + r" [\mathrm{m}]$"
+            y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=False)
 
             label = model_labels[midx]
             title = groupname + " (" + x_value_str + ", " + y_value_str
 
             if sweep_parameters is not None or display_parameters is not None:
+                all_parameters = []
+                all_parameters.extend(sweep_parameters if sweep_parameters is not None else [])
+                all_parameters.extend(display_parameters if display_parameters is not None else [])
+
                 if sweep_dict is None:
                     df_parameters = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-parameters.csv", data_export)
+                    df_terminals = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
                 else:
                     df_parameters = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-parameters.csv", data_export)
+                    df_terminals = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
 
                 if display_parameters is not None:
-                    title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=True) 
+                    title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals) 
                 if sweep_parameters is not None:
-                    label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False)
+                    label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals)
 
             if sweep_parameters_dict is not None:
                 label = ""
@@ -927,7 +781,7 @@ def zaxis_plot(
 
             title += ")"
 
-            fig, ax = standard_scatter_plot_df(
+            fig, ax = apf.standard_scatter_plot_df(
                         df = df_plot,
                         x = xparam,
                         y = yparam,
@@ -958,11 +812,7 @@ def zaxis_plot(
 
         fig, ax = apf.plot_background(fig, ax)
         
-        ax.legend(
-            loc="upper center", 
-            bbox_to_anchor=(0.5, -0.15/fraction), 
-            ncol=2
-            )
+        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
         
         # remove any text in parentheses and leading/trailing whitespace
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
@@ -998,6 +848,7 @@ def yaxis_plot(
     plot_z: list[float] = [-3e-06, -9e-06],
     insulator: bool = False,
     width_limit_param: str | None = "conductor_all_width", 
+    width_limit: float | None = None,
     display_parameters: list[str] | None = None,
 
     # sweep
@@ -1079,21 +930,23 @@ def yaxis_plot(
         if z_value not in unique_z_values:
             print(f"{z_value} is not a valid z value.")
 
-    width_limit = np.inf
-    if width_limit_param is not None and width_limit_param in df_parameters["name"].values:
-        mask = df_parameters["name"] == width_limit_param
-        width_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
+    if width_limit is None:
+        width_limit = np.inf
+        if width_limit_param is not None and width_limit_param in df_parameters["name"].values:
+            mask = df_parameters["name"] == width_limit_param
+            width_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
 
-    if "02_00" in modelfolder:
-        conB_width_offset = 0.0
-        mask = df_parameters["name"] == "epilayer_width"
-        conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        mask = df_parameters["name"] == "conductor_epilayer_distance"
-        conB_width_offset += df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        mask = df_parameters["name"] == "conductor_B_width"
-        conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
+        if "02_00" in modelfolder:
+            conB_width_offset = 0.0
+            mask = df_parameters["name"] == "epilayer_width"
+            conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            mask = df_parameters["name"] == "conductor_epilayer_distance"
+            conB_width_offset += df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            mask = df_parameters["name"] == "conductor_B_width"
+            conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
 
-        width_limit = 1.5 * conB_width_offset
+            width_limit = 1.5 * conB_width_offset
+
 
     # plotting
     xparam = "y"
@@ -1122,14 +975,14 @@ def yaxis_plot(
                 mask = df_plot[xparam].abs() <= width_limit
                 df_plot = df_plot[mask]
 
-                x_value_str = r"$\bm{x =" + f" {x_value}" + r" [\mathrm{m}]}$"
-                x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=True)
+                x_value_str = r"$x =" + f" {x_value}" + r" [\mathrm{m}]$"
+                x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=False)
 
-                z_value_str = r"$\bm{z =" + f" {z_value}" + r" [\mathrm{m}]}$"
+                z_value_str = r"$z =" + f" {z_value}" + r" [\mathrm{m}]$"
 
                 if len(plot_z) < 2:
                     label = model_labels[midx]
-                    z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=True)
+                    z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                     title = groupname + " (" + x_value_str + "," + z_value_str 
                 else:
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
@@ -1137,15 +990,21 @@ def yaxis_plot(
                     title = groupname + " (" + x_value_str
 
                 if sweep_parameters is not None or display_parameters is not None:
+                    all_parameters = []
+                    all_parameters.extend(sweep_parameters if sweep_parameters is not None else [])
+                    all_parameters.extend(display_parameters if display_parameters is not None else [])
+                
                     if sweep_dict is None:
                         df_parameters = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-parameters.csv", data_export)
+                        df_terminals = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
                     else:
                         df_parameters = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-parameters.csv", data_export)
-
+                        df_terminals = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
+                
                     if display_parameters is not None:
-                        title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=True) 
+                        title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals) 
                     if sweep_parameters is not None:
-                        label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False)
+                        label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals)
 
                 if sweep_parameters_dict is not None:
                     label = ""
@@ -1159,7 +1018,7 @@ def yaxis_plot(
 
                 title += ")"
 
-                fig, ax = standard_scatter_plot_df(
+                fig, ax = apf.standard_scatter_plot_df(
                             df = df_plot,
                             x = xparam,
                             y = yparam,
@@ -1190,11 +1049,7 @@ def yaxis_plot(
 
             fig, ax = apf.plot_background(fig, ax)
             
-            ax.legend(
-                loc="upper center", 
-                bbox_to_anchor=(0.5, -0.15/fraction), 
-                ncol=2
-                )
+            fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
         
         # remove any text in parentheses and leading/trailing whitespace
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
@@ -1204,7 +1059,7 @@ def yaxis_plot(
         makedirs(plot_output_folder, exist_ok=True)  
 
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
-        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}")
+        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}-{"__".join(map(str, plot_z))}")
 
 ##############################################################################
 
@@ -1229,7 +1084,8 @@ def xaxis_plot(
     y_axis_params: list[str] = ["mf.Bx (T)", "mf.By (T)", "mf.Bz (T)", "T (K)"],
     plot_z: list[float] = [-3e-06, -9e-06],
     insulator: bool = False,
-    length_limit_param: str | None = "conductor_all_length",
+    length_limit_param: str | None = "conductor_all_length", 
+    length_limit: float | None = None,
     display_parameters: list[str] | None = None,
 
     # sweep
@@ -1310,10 +1166,11 @@ def xaxis_plot(
         if z_value not in unique_z_values:
             print(f"{z_value} is not a valid z value.")
 
-    length_limit = np.inf
-    if length_limit_param is not None and length_limit_param in df_parameters["name"].values:
-        mask = df_parameters["name"] == length_limit_param
-        length_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
+    if length_limit is None:
+        length_limit = np.inf
+        if length_limit_param is not None and length_limit_param in df_parameters["name"].values:
+            mask = df_parameters["name"] == length_limit_param
+            length_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
 
     # plotting
     xparam = "x"
@@ -1342,14 +1199,14 @@ def xaxis_plot(
                 mask = df_plot[xparam].abs() <= length_limit
                 df_plot = df_plot[mask]
 
-                y_value_str = r"$\bm{y =" + f" {y_value}" + r" [\mathrm{m}]}$"
-                y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=True)
+                y_value_str = r"$y =" + f" {y_value}" + r" [\mathrm{m}]$"
+                y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=False)
 
-                z_value_str = r"$\bm{z =" + f" {z_value}" + r" [\mathrm{m}]}$"
+                z_value_str = r"$z =" + f" {z_value}" + r" [\mathrm{m}]$"
 
                 if len(plot_z) < 2:
                     label = model_labels[midx]
-                    z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=True)
+                    z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                     title = groupname + " (" + y_value_str + "," + z_value_str
                 else:
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
@@ -1357,15 +1214,21 @@ def xaxis_plot(
                     title = groupname + " (" + y_value_str
 
                 if sweep_parameters is not None or display_parameters is not None:
+                    all_parameters = []
+                    all_parameters.extend(sweep_parameters if sweep_parameters is not None else [])
+                    all_parameters.extend(display_parameters if display_parameters is not None else [])
+                
                     if sweep_dict is None:
                         df_parameters = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-parameters.csv", data_export)
+                        df_terminals = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
                     else:
                         df_parameters = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-parameters.csv", data_export)
-
+                        df_terminals = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
+                
                     if display_parameters is not None:
-                        title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=True) 
+                        title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals) 
                     if sweep_parameters is not None:
-                        label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False)
+                        label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals)
 
                 if sweep_parameters_dict is not None:
                     label = ""
@@ -1379,7 +1242,7 @@ def xaxis_plot(
 
                 title += ")"
 
-                fig, ax = standard_scatter_plot_df(
+                fig, ax = apf.standard_scatter_plot_df(
                             df = df_plot,
                             x = xparam,
                             y = yparam,
@@ -1410,12 +1273,8 @@ def xaxis_plot(
 
             fig, ax = apf.plot_background(fig, ax)
             
-            ax.legend(
-                loc="upper center", 
-                bbox_to_anchor=(0.5, -0.15/fraction), 
-                ncol=2
-                )
-        
+            fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
+
         # remove any text in parentheses and leading/trailing whitespace
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
@@ -1424,7 +1283,7 @@ def xaxis_plot(
         makedirs(plot_output_folder, exist_ok=True)  
 
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
-        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}")
+        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}-{"__".join(map(str, plot_z))}")
 
 
 ##############################################################################
@@ -1445,7 +1304,9 @@ def xyplane_plot(
     fraction: float = 1.0,
     z_axis_params: list[str] = ["mf.Bx (T)", "mf.By (T)", "mf.Bz (T)", "T (K)"],
     length_limit_param: str | None = "conductor_all_length",
+    length_limit: float | None = None,
     width_limit_param: str | None = "conductor_all_width",
+    width_limit: float | None = None,
     display_parameters: list[str] | None = None,
 
     # sweep
@@ -1503,27 +1364,32 @@ def xyplane_plot(
     else:
         df_parameters = import_csv_to_df_sweep(0, input_folder, modelfolder, modelnames[0], sweep_dict, "-parameters.csv", data_export)
 
-    length_limit = np.inf
-    if length_limit_param is not None and length_limit_param in df_parameters["name"].values:
-        mask = df_parameters["name"] == length_limit_param
-        length_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
+    if length_limit is None:
+        length_limit = np.inf
+        if length_limit_param is not None and length_limit_param in df_parameters["name"].values:
+            mask = df_parameters["name"] == length_limit_param
+            length_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
 
-    width_limit = np.inf
-    if width_limit_param is not None and width_limit_param in df_parameters["name"].values:
-        mask = df_parameters["name"] == width_limit_param
-        width_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
+    if width_limit is None:
+        width_limit = np.inf
+        if width_limit_param is not None and width_limit_param in df_parameters["name"].values:
+            mask = df_parameters["name"] == width_limit_param
+            width_limit = 1.5 / 2 * float(df_parameters.loc[mask, "evaluated_value"].iloc[0])
 
-    if "02_00" in modelfolder:
-        conB_width_offset = 0.0
-        mask = df_parameters["name"] == "epilayer_width"
-        conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        mask = df_parameters["name"] == "conductor_epilayer_distance"
-        conB_width_offset += df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        mask = df_parameters["name"] == "conductor_B_width"
-        conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
-        
-        width_limit = 1.5 * conB_width_offset
+        if "02_00" in modelfolder:
+            conB_width_offset = 0.0
+            mask = df_parameters["name"] == "epilayer_width"
+            conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            mask = df_parameters["name"] == "conductor_epilayer_distance"
+            conB_width_offset += df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            mask = df_parameters["name"] == "conductor_B_width"
+            conB_width_offset += 0.5 * df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            
+            width_limit = 1.5 * conB_width_offset
 
+    if width_limit is None or length_limit is None:
+        raise ValueError("Both width_limit and length_limit must be provided or computable from parameters.")
+    
     width_limit = max(width_limit, length_limit) # ensure width limit is at least as large as length limit
     length_limit = max(length_limit, width_limit) # ensure length limit is at least as large as width limit
 
@@ -1546,19 +1412,26 @@ def xyplane_plot(
             df_plot = df_plot.dropna()
             df_plot = df_plot[(df_plot[xparam].abs() <= length_limit) & (df_plot[yparam].abs() <= width_limit)]
 
-            z_value_str = r"$\bm{z =" + f" {z_value}" + r" [\mathrm{m}]}$"
+            z_value_str = r"$z =" + f" {z_value}" + r" [\mathrm{m}]$"
             z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
             title = groupname + " (" + model_labels[midx] + ", " + z_value_str
 
             if sweep_parameters is not None or display_parameters is not None:
+                all_parameters = []
+                all_parameters.extend(sweep_parameters if sweep_parameters is not None else [])
+                all_parameters.extend(display_parameters if display_parameters is not None else [])
+            
                 if sweep_dict is None:
                     df_parameters = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-parameters.csv", data_export)
+                    df_terminals = import_csv_to_df(input_folder, modelfolder, modelnames[midx], "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
                 else:
                     df_parameters = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-parameters.csv", data_export)
+                    df_terminals = import_csv_to_df_sweep(midx, input_folder, modelfolder, modelnames[midx], sweep_dict, "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
+            
                 if display_parameters is not None:
-                    title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=True) 
+                    title += ", " + display_params(display_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals) 
                 if sweep_parameters is not None:
-                    title += ", " + display_params(sweep_parameters, df_parameters, translation_dict, bm=True)
+                    label = display_params(sweep_parameters, df_parameters, translation_dict, bm=False, df_terminals=df_terminals)
 
                 if sweep_parameters_dict is not None:
                     label = ""
@@ -1567,14 +1440,14 @@ def xyplane_plot(
                         name = param
                         value_str = name + r" = " + f"{value}"
                         value_str = apf.translate_and_prefix_label(value_str, translation_dict, bm=True)
-                        value_str = r"\bm{" + value_str.strip("$") + "}"
+                        value_str = value_str.strip("$")
                         label += "$" + value_str+ "$, "
                     label = label.strip(", ")
             
 
             title += ")"
 
-            fig, ax = standard_scatter_plot_df(
+            fig, ax = apf.standard_scatter_plot_df(
                         df = df_plot,
                         x = xparam,
                         y = yparam,
@@ -1588,7 +1461,7 @@ def xyplane_plot(
                         xstyle = 'prefix',
                         ystyle = 'prefix',
                         zstyle = 'prefix',
-                        markersize = 0.001*apf.MARKERSIZE,
+                        markersize = 0.01*apf.MARKERSIZE,
                     )
         
             # remove any text in parentheses and leading/trailing whitespace
@@ -1721,13 +1594,13 @@ def angle_error_plot(
                 df_plot = pd.concat([df_plot, df_temp[mask][[xparam, yparam]]], ignore_index=True)
 
 
-            x_value_str = r"$\bm{x =" + f" {x_value}" + r" [\mathrm{m}]}$"
+            x_value_str = r"$x =" + f" {x_value}" + r" [\mathrm{m}]$"
             x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=True)
 
-            y_value_str = r"$\bm{y =" + f" {y_value}" + r" [\mathrm{m}]}$"
+            y_value_str = r"$y =" + f" {y_value}" + r" [\mathrm{m}]$"
             y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=True)
 
-            z_value_str = r"$\bm{z =" + f" {z_value}" + r" [\mathrm{m}]}$"
+            z_value_str = r"$z =" + f" {z_value}" + r" [\mathrm{m}]$"
             l_value_str = r"$N_\mathrm{left-out} =" + f" {left_out_lines}" + r"$"
 
             if len(plot_z) < 2:
@@ -1744,7 +1617,7 @@ def angle_error_plot(
 
             title += ")"
 
-            fig, ax = standard_scatter_plot_df(
+            fig, ax = apf.standard_scatter_plot_df(
                 df = df_plot,
                 x = xparam,
                 y = yparam,
@@ -1767,11 +1640,7 @@ def angle_error_plot(
                 )
                 
     if label is not None:
-        ax.legend(
-            loc="upper center", 
-            bbox_to_anchor=(0.5, -0.15/fraction), 
-            ncol=2
-            )
+        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
     
     # create output folder 
     plot_output_folder = output_folder / modelfolder / "angle error"
