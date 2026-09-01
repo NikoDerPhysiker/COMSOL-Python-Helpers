@@ -66,7 +66,7 @@ plt.rcParams.update({
 plt.rcParams.update({
     "font.size": FONTSIZE,                
     "axes.labelsize": FONTSIZE,
-    "legend.fontsize": FONTSIZE,
+    "legend.fontsize": 0.9 * FONTSIZE,
     "xtick.labelsize": 0.8 * FONTSIZE,
     "ytick.labelsize": 0.8 * FONTSIZE,
 })
@@ -507,7 +507,8 @@ def dynamic_legend(
     fig: matplotlib.figure.Figure,
     ax: matplotlib.axes.Axes,
     fraction: float = 1.0,
-    width_tolerance: float = 1.10,
+    width_tolerance: float = 1.25,# 1.10,
+    use_parity: bool = False,
 ):
     """
     Creates a dynamic legend for a matplotlib plot, adjusting the number of columns based on the plot width and number of legend entries (even or odd).
@@ -522,14 +523,15 @@ def dynamic_legend(
     Returns:
         tuple (Figure, Axes): A tuple containing the updated matplotlib figure and axes objects.
     """
-    # 1. Handles und Labels extrahieren
+    # 1. Get the current legend handles and labels
     handles, labels = ax.get_legend_handles_labels()
     n_entries = len(handles)
 
     if n_entries == 0:
         return fig, ax
 
-    # 2. Regel 3: Sortierung nach Typ (Scatter links, Lines rechts), falls abwechselnd
+    # 2. Rule 1: Check if the legend entries alternate between scatter and line plots 
+    # and change the order of the legend entries so that scatter entries are on the left and line entries are on the right.
     is_scatter = [isinstance(h, PathCollection) for h in handles]
 
     is_alternating = False
@@ -544,10 +546,15 @@ def dynamic_legend(
         handles = [item[0] for item in sorted_items]
         labels = [item[1] for item in sorted_items]
 
-    # 3. Regel 1: Start-Spaltenanzahl passend zur Paritaet von n_entries waehlen
-    ncol_start = 2 if n_entries % 2 == 0 else 1
+    # 3. Rule 2: Check the parity of the number of legend entries if flag is set.
+    if use_parity:
+        ncol_start = 2 if n_entries % 2 == 0 else 1
+        test_ncol_range = range(ncol_start, n_entries + 1, 2)
+    else:
+        ncol_start = 1
+        test_ncol_range = range(ncol_start, n_entries + 1, 1)
 
-    # "Plotbreite" = Gesamtbreite der Figure inkl. Achsenbeschriftung etc.
+    # get the figure width (= total width of the figure including axes labels, etc.) in points and calculate the allowed maximum width for the legend
     fig_width_pts = fig.get_size_inches()[0] * 72
     allowed_max_width_pts = fig_width_pts * width_tolerance
 
@@ -556,10 +563,10 @@ def dynamic_legend(
     if existing_legend is not None:
         existing_legend.remove()
 
-    # 4. Regel 2: Fuer jede erlaubte (paritaetskonforme) Spaltenanzahl die
-    # Legende probeweise rendern und die tatsaechliche Breite messen
+    # 4. Rule 2: For each allowed (parity-conforming) number of columns, render the
+    # legend as a test and measure the actual width
     optimal_ncol = ncol_start
-    for test_ncol in range(ncol_start, n_entries + 1, 2):
+    for test_ncol in test_ncol_range:
         trial_legend = ax.legend(
             handles=handles,
             labels=labels,
@@ -568,9 +575,8 @@ def dynamic_legend(
             ncol=test_ncol,
         )
         fig.canvas.draw()
-        # fig.canvas ist zur Laufzeit ein Agg-basierter Canvas (Agg, TkAgg,
-        # Qt5Agg, ...); FigureCanvasBase selbst deklariert get_renderer()
-        # nicht, daher der cast fuer den Type Checker.
+        # fig.canvas is at runtime an Agg-based canvas (Agg, TkAgg, Qt5Agg, ...); 
+        # FigureCanvasBase itself does not declare get_renderer(), hence the cast for the type checker.
         renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
         legend_width_pts = trial_legend.get_window_extent(renderer).width / fig.dpi * 72
         trial_legend.remove()
@@ -580,7 +586,7 @@ def dynamic_legend(
         else:
             break
 
-    # 5. Finale Legende setzen
+    # 5. Finally, render the legend with the optimal number of columns
     ax.legend(
         handles=handles,
         labels=labels,
