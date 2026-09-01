@@ -606,6 +606,7 @@ def import_COMSOLTXT_to_df_sweep(iteration: int, input_folder: Path, modelfolder
     return header, df
 
 ##############################################################################
+##############################################################################
 
 def display_params(params: list[str], df_parameters: pd.DataFrame, translation_dict: dict[str, str], bm: bool = False, df_terminals: pd.DataFrame | None = None) -> str:
     label = ""
@@ -640,6 +641,144 @@ def display_params(params: list[str], df_parameters: pd.DataFrame, translation_d
 
     return label.strip(", ")
 
+##############################################################################
+##############################################################################
+
+def reduce_points_by_density(
+    df: pd.DataFrame,
+    sort_column: str,
+    percentage: float,
+    rtol: float = 1e-7
+    ) -> pd.DataFrame:
+    """
+    Reduces the number of data points in a DataFrame by removing points from the densest regions based on a specified percentage.
+    Aditionally, it merges near-identical floating-point values based on a relative tolerance (rtol) to handle duplicates.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing the data points.
+        sort_column (str): The column name to sort and calculate density by.
+        percentage (float): The percentage of points to remove from the densest regions (0 to 100).
+        rtol (float): Relative tolerance for merging near-identical floating-point values. Defaults to 1e-7.
+
+    Returns:
+        pd.DataFrame: A new DataFrame with reduced data points, sorted by the specified column.
+    """
+    if not (0 <= percentage < 100):
+        raise ValueError("Percentage must be between 0 and 100.")
+    if sort_column not in df.columns:
+        raise ValueError(f"Column '{sort_column}' not found in DataFrame.")
+
+    # 1. Sort initially to find adjacent duplicate points across any scale
+    df_sorted = df.sort_values(by=sort_column).copy()
+
+    # 2. Group near-identical floating point values using relative tolerance
+    # Extract native numpy array to satisfy Pylance type checking for np.diff
+    values: np.ndarray = df_sorted[sort_column].to_numpy()
+
+    with np.errstate(divide="ignore", invalid="ignore"):
+        # Rel. diff: |x1 - x0| / max(|x0|, |x1|)
+        abs_diff = np.abs(np.diff(values))
+        max_vals = np.maximum(np.abs(values[:-1]), np.abs(values[1:]))
+        # Handle exact zeros to avoid 0/0 division
+        max_vals[max_vals == 0] = 1.0
+        rel_diff = abs_diff / max_vals
+
+    # Create group IDs: increment group index whenever relative difference > rtol
+    group_boundary = rel_diff > rtol
+    # Prepend 0 to maintain array length alignment after diff
+    group_ids = np.concatenate(
+        (np.array([0], dtype=int), np.cumsum(group_boundary))
+    )
+
+    # Aggregate duplicates using the mean
+    df_aggregated = df_sorted.groupby(group_ids).mean()
+
+    if percentage == 0:
+        return df_aggregated.reset_index(drop=True)
+
+    # 3. Calculate local density on the aggregated data (using distance)
+    # Replaced deprecated fillna(method="bfill") with pandas 2.0 compliant .bfill()
+    distances = df_aggregated[sort_column].diff().bfill()
+
+    # 4. Determine threshold to drop the densest points
+    num_to_drop = int(len(df_aggregated) * (percentage / 100.0))
+
+    if num_to_drop == 0:
+        return df_aggregated.reset_index(drop=True)
+
+    threshold_distance = np.partition(distances.to_numpy(), num_to_drop)[
+        num_to_drop
+    ]
+
+    # 5. Filter out the densest points
+    df_reduced = df_aggregated[distances >= threshold_distance]
+
+    # Handle edge cases where identical distances exist
+    target_size = len(df_aggregated) - num_to_drop
+    if len(df_reduced) > target_size:
+        df_reduced = df_reduced.head(target_size)
+
+    return df_reduced.reset_index(drop=True)
+
+##############################################################################
+
+def reduce_points_randomly(df: pd.DataFrame, percentage: float) -> pd.DataFrame:
+    """
+    Randomly reduces the number of data points in a DataFrame by removing a specified percentage of points.
+    Args:
+        df (pd.DataFrame): The input DataFrame containing the data points.
+        percentage (float): The percentage of points to remove randomly (0 to 100).
+    
+    Returns:
+        pd.DataFrame: A new DataFrame with randomly reduced data points.
+    """
+    if not (0 <= percentage < 100):
+        raise ValueError("Percentage must be between 0 and 100.")
+
+    keep_fraction = 1.0 - (percentage / 100.0)
+    return df.sample(frac=keep_fraction, random_state=42).reset_index(drop=True)
+
+##############################################################################
+
+def reduce_points(
+    df: pd.DataFrame,
+    random_pct: float = 0.0,
+    density_pct: float = 0.0,
+    sort_column: str | None = None,
+    rtol: float = 1e-7,
+) -> pd.DataFrame:
+    """
+    Reduces the number of data points in a DataFrame by applying density-based reduction followed by random reduction.
+
+    Args:
+        df (pd.DataFrame): The input DataFrame containing the data points.
+        random_pct (float): The percentage of points to remove randomly (0 to 100).
+        density_pct (float): The percentage of points to remove from densest regions (0 to 100).
+        sort_column (str, optional): The column name to sort and calculate density by.
+        rtol (float): Relative tolerance to merge floating-point duplicates.
+
+    Returns:
+        pd.DataFrame: A new DataFrame with reduced data points.
+    """
+    current_df = df.copy()
+
+    # 1. Apply density reduction first (includes scale-independent duplicate merging)
+    if density_pct > 0 or sort_column is not None:
+        if sort_column is None:
+            raise ValueError(
+                "A 'sort_column' must be provided when density_pct > 0."
+            )
+        current_df = reduce_points_by_density(
+            current_df, sort_column, density_pct, rtol
+        )
+
+    # 2. Apply random reduction on the remaining data
+    if random_pct > 0:
+        current_df = reduce_points_randomly(current_df, random_pct)
+
+    return current_df
+
+##############################################################################
 ##############################################################################
 
 def zaxis_plot(
@@ -714,6 +853,10 @@ def zaxis_plot(
         y_values.update(df["y"].dropna())
 
         list_df.append(df)
+
+    if len(list_df) == 0:
+        print("No valid dataframes to plot. Exiting function.")
+        return
 
     x_value = np.mean(list(x_values))
     if x_value < 1e-20:
@@ -894,6 +1037,9 @@ def yaxis_plot(
             depth_header_data, df = import_COMSOLTXT_to_df(input_folder, modelfolder, modelnames[midx], ending, data_export)
         else:
             depth_header_data, df = import_COMSOLTXT_to_df_sweep(iterations[midx], input_folder, modelfolder, modelnames[midx], sweep_dict, ending, data_export)
+        if df.empty:
+            print(f"Warning: DataFrame for model '{modelnames[midx]}' is empty. Skipping this model.")
+            continue
 
         df["x"] = cdi.round_to_6_sig_digits(df["x"])
         x_values.update(df["x"].dropna())
@@ -902,6 +1048,10 @@ def yaxis_plot(
         z_values.update(df["z"].dropna())
 
         list_df.append(df)
+
+    if len(list_df) == 0:
+        print("No valid dataframes to plot. Exiting function.")
+        return
 
     x_value = np.mean(list(x_values)) 
     if x_value < 1e-20:
@@ -983,7 +1133,7 @@ def yaxis_plot(
                 if len(plot_z) < 2:
                     label = model_labels[midx]
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
-                    title = groupname + " (" + x_value_str + "," + z_value_str 
+                    title = groupname + " (" + x_value_str + ", " + z_value_str 
                 else:
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                     label = z_value_str + ", " + model_labels[midx]
@@ -1130,6 +1280,9 @@ def xaxis_plot(
             depth_header_data, df = import_COMSOLTXT_to_df(input_folder, modelfolder, modelnames[midx], ending, data_export)
         else:
             depth_header_data, df = import_COMSOLTXT_to_df_sweep(iterations[midx], input_folder, modelfolder, modelnames[midx], sweep_dict, ending, data_export)
+        if df.empty:
+            print(f"Warning: DataFrame for model '{modelnames[midx]}' is empty. Skipping this model.")
+            continue
 
         df["y"] = cdi.round_to_6_sig_digits(df["y"])
         y_values.update(df["y"].dropna())
@@ -1138,6 +1291,10 @@ def xaxis_plot(
         z_values.update(df["z"].dropna())
 
         list_df.append(df)
+
+    if len(list_df) == 0:
+        print("No valid dataframes to plot. Exiting function.")
+        return
 
     y_value = np.mean(list(y_values)) 
     if y_value < 1e-20:
@@ -1207,7 +1364,7 @@ def xaxis_plot(
                 if len(plot_z) < 2:
                     label = model_labels[midx]
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
-                    title = groupname + " (" + y_value_str + "," + z_value_str
+                    title = groupname + " (" + y_value_str + ", " + z_value_str
                 else:
                     z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                     label = z_value_str + ", " + model_labels[midx]
@@ -1349,11 +1506,18 @@ def xyplane_plot(
             depth_header_data, df = import_COMSOLTXT_to_df(input_folder, modelfolder, modelnames[midx], ending, data_export)
         else:
             depth_header_data, df = import_COMSOLTXT_to_df_sweep(iterations[midx], input_folder, modelfolder, modelnames[midx], sweep_dict, ending, data_export)
+        if df.empty:
+            print(f"Warning: DataFrame for model '{modelnames[midx]}' is empty. Skipping this model.")
+            continue
 
         df["z"] = cdi.round_to_6_sig_digits(df["z"])
         z_values.update(df["z"].dropna())
 
         list_df.append(df)
+
+    if len(list_df) == 0:
+        print("No valid dataframes to plot. Exiting function.")
+        return
 
     z_value = np.mean(list(z_values)) 
     if z_value < 1e-20:
@@ -1439,7 +1603,7 @@ def xyplane_plot(
                         value = sweep_parameters_dict[param][midx]
                         name = param
                         value_str = name + r" = " + f"{value}"
-                        value_str = apf.translate_and_prefix_label(value_str, translation_dict, bm=True)
+                        value_str = apf.translate_and_prefix_label(value_str, translation_dict, bm=False)
                         value_str = value_str.strip("$")
                         label += "$" + value_str+ "$, "
                     label = label.strip(", ")
@@ -1492,6 +1656,9 @@ def angle_error_plot(
     ending: str = "-depth_exported_data.txt", 
     fraction: float = 1.0,
     z_list: list[float] | None = None,
+
+    display_statistics: bool = True,
+    plot_mean: bool = False,
     ):
 
     if len(modelnames) != 1:
@@ -1505,6 +1672,9 @@ def angle_error_plot(
     iterations = np.arange(angle_iterations) if angle_iterations > 0 else []
     modelnames = [modelname] * angle_iterations
 
+    if angle_iterations == 0:
+        print("No files found for angle error plotting. Exiting function.")
+        return
     if angle_iterations < len(sweep_parameters_dict["Set angle (°)"]):
         raise ValueError("The number of angle iterations does not match the length of 'Set angle (°)' in sweep_parameters_dict.")
 
@@ -1518,6 +1688,9 @@ def angle_error_plot(
         for idx in range(angle_iterations):
             # get all depth dataframes
             depth_header_data, df = import_COMSOLTXT_to_df_sweep(iterations[idx], input_folder, modelfolder, modelnames[idx], sweep_dict, ending, data_export, left_out_lines=left_out_lines)
+            if df.empty:
+                print(f"Warning: DataFrame for model '{modelnames[idx]}' is empty. Skipping this model.")
+                continue
 
             df["x"] = cdi.round_to_6_sig_digits(df["x"])
             x_values.update(df["x"].dropna())
@@ -1530,6 +1703,9 @@ def angle_error_plot(
 
             list_df.append(df)
 
+    if len(list_df) == 0:
+        print("No valid dataframes to plot. Exiting function.")
+        return
 
     x_value = np.mean(list(x_values))
     if x_value < 1e-20:
@@ -1571,7 +1747,10 @@ def angle_error_plot(
     # Color
     cmap = mpl.colormaps['viridis'] # type: ignore
 
+    df_statistics = pd.DataFrame(columns=["Left out lines", "z", "Mean Angle Error (°)", "Std Dev (°)"])
     # Data
+    if plot_mean:
+        df_mean = pd.DataFrame()
     for lidx, left_out_lines in enumerate(sweep_parameters_dict["left_out_lines"]):
         for zidx, z_value in enumerate(plot_z):
             df_plot = pd.DataFrame()
@@ -1593,29 +1772,52 @@ def angle_error_plot(
 
                 df_plot = pd.concat([df_plot, df_temp[mask][[xparam, yparam]]], ignore_index=True)
 
+            if plot_mean:
+                df_mean = pd.concat([df_mean, df_plot], ignore_index=True)
+
+            mean_error = df_plot[yparam].mean()
+            std_error = df_plot[yparam].std()
+            max_error = df_plot[yparam].max()
+
+            df_statistics = pd.concat([ 
+                                df_statistics, 
+                                pd.DataFrame({
+                                    "Left out lines":       [left_out_lines],
+                                    "z":                    [z_value],
+                                    "Mean Angle Error (°)": [mean_error],
+                                    "Std Dev (°)":          [std_error],
+                                    "Max Angle Error (°)":  [max_error],
+                                    })
+                                ], ignore_index=True)
+
+            
 
             x_value_str = r"$x =" + f" {x_value}" + r" [\mathrm{m}]$"
-            x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=True)
+            x_value_str = apf.set_prefix_in_number_unit_string(x_value_str, bm=False)
 
             y_value_str = r"$y =" + f" {y_value}" + r" [\mathrm{m}]$"
-            y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=True)
+            y_value_str = apf.set_prefix_in_number_unit_string(y_value_str, bm=False)
 
             z_value_str = r"$z =" + f" {z_value}" + r" [\mathrm{m}]$"
             l_value_str = r"$N_\mathrm{left-out} =" + f" {left_out_lines}" + r"$"
 
             if len(plot_z) < 2:
-                z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=True)
+                z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                 if len(sweep_parameters_dict["left_out_lines"]) == 1:
-                    label = None
+                    label = ""
                 else:
                     label = l_value_str
-                title = groupname + " (" + x_value_str + "," + z_value_str
+                title = groupname + " (" + x_value_str + ", " + z_value_str
             else:
                 z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
                 label = z_value_str + ", " + l_value_str
                 title = groupname + " (" + x_value_str
 
             title += ")"
+
+            if display_statistics:
+                statistic_str = r", $\mu\pm\sigma = "+ f"{mean_error:.6f}" + r"[^\circ] \pm " + f"{std_error:.6f}" + r"[^\circ]$"
+                label += statistic_str
 
             fig, ax = apf.standard_scatter_plot_df(
                 df = df_plot,
@@ -1638,7 +1840,11 @@ def angle_error_plot(
                 xstyle = 'prefix',
                 ystyle = 'prefix',
                 )
-                
+    if plot_mean:
+        df_mean_grouped = df_mean.groupby(xparam).mean().reset_index()
+        ax.plot(df_mean_grouped[xparam], df_mean_grouped[yparam], label="mean", color="tab:red")
+
+    fig, ax = apf.plot_background(fig, ax)
     if label is not None:
         fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
     
@@ -1646,5 +1852,7 @@ def angle_error_plot(
     plot_output_folder = output_folder / modelfolder / "angle error"
     makedirs(plot_output_folder, exist_ok=True)  
     apf.save_figure(fig, path = plot_output_folder / f"{modelnames[0]}-Angle Error-{"__".join(map(str, plot_z))}")
+
+    return df_statistics
 
 ##############################################################################

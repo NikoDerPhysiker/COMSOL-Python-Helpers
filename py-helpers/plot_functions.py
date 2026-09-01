@@ -1,6 +1,10 @@
 # Author: Niko Bleidistel
 # last change: 2026-08-05
 
+# Hint: This is an old file, which is not used anymore. Instead of this file, the new file 'advanced_plotting_functions.py' should be used.
+# It has fundamentally changed and uses a different approach which allows for more customizations. 
+
+
 # Description:
 # This module provides functions for plotting data with error bars and optional fitting, 
 # specifically designed to work with data that may include uncertainties (using the 'uncertainties' package). 

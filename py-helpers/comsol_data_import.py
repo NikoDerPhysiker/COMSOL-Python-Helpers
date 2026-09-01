@@ -37,9 +37,6 @@ def read_comsol_export(file_path: str):
 
     Returns:
         (dict, pandas.DataFrame): A tuple containing the header information as key-value pairs and the numerical data as a pandas DataFrame.
-
-    Raises:
-        ValueError: If the file_path is not a string.
     """
     if not isinstance(file_path, (str)):
         raise ValueError("file_path must be a string representing the path to the COMSOL data export file.")
@@ -50,8 +47,12 @@ def read_comsol_export(file_path: str):
     data_lines = []
     column_names = []
 
-    with open(file_path, "r", encoding="utf-8") as f:
-        lines = f.readlines() # read all lines at once
+    try: 
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = f.readlines() # read all lines at once
+    except Exception as e:
+        print(f"Error reading file {file_path}:\n{e}")
+        return {}, pd.DataFrame()
 
     for line in lines:
         line_str = line.strip() # remove leading/trailing whitespace and newline characters

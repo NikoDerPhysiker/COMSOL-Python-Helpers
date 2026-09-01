@@ -39,7 +39,10 @@ TEXTWIDTH = 455.24411   # in pt, of the latex document
 TEXTHEIGHT = 635.25946  # in pt, of the latex document
 
 MARKERSIZE = 5         # of the plot markers
-TITLECOLOR = (0 / 255, 51 / 255, 102 / 255) # color of the title = FAU-Blau
+
+MAINCOLOR = (0/255, 51/255, 102/255)            # color of the title = FAU-Blau
+SECONDARYCOLOR = (190/255, 205/255, 220/255)    # Light blue
+BACKGROUNDCOLOR = (225/255, 225/255, 225/255)   # Light gray
 
 ##############################################################################
 # style settings
@@ -66,6 +69,21 @@ plt.rcParams.update({
     "legend.fontsize": FONTSIZE,
     "xtick.labelsize": 0.8 * FONTSIZE,
     "ytick.labelsize": 0.8 * FONTSIZE,
+})
+
+plt.rcParams.update({
+    "axes.titlecolor": MAINCOLOR,           # color of the title
+    "axes.labelcolor": "black",             # color of the x and y axis labels
+    "axes.edgecolor": MAINCOLOR,            # color of the axes lines
+    "xtick.color": "black",                 # color of the x-axis tick labels
+    "ytick.color": "black",                 # color of the y-axis tick labels
+    "axes.linewidth": 1.0,                  # linewidth of the axes lines
+
+    "legend.facecolor": "white",            # background color of the legend box
+    "legend.edgecolor": MAINCOLOR,          # frame color of the legend box
+    "legend.frameon": True,                 # whether to draw a frame around the legend
+    "legend.labelcolor": "black",           # color of the text in the legend
+    "legend.linewidth": 1.0,                # linewidth of the frame around the legend
 })
 
 ##############################################################################
@@ -475,7 +493,7 @@ def plot_background(
             main_title = title
             subtitle = ""
 
-        ax.set_title(rf"\textbf{{{main_title}}}"+"\n\n"+rf"{{{subtitle}}}", color=TITLECOLOR, pad=20)
+        ax.set_title(rf"\textbf{{{main_title}}}"+"\n\n"+rf"{{{subtitle}}}", pad=20)
 
     ax.set_axisbelow(True)  # Ensure grid is below other plot elements
     ax.grid(True, which='both', linestyle='--', zorder=0)
@@ -605,7 +623,7 @@ def standard_scatter_plot(
         z: list[float] | None = None,
 
         label: str | None = None,
-        color: tuple[float, float, float] |str | None = TITLECOLOR,
+        color: tuple[float, float, float] |str | None = MAINCOLOR,
         markersize: float = MARKERSIZE,
         translation_dict: dict[str, str] | None = None,
 

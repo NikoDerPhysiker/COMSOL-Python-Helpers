@@ -1,6 +1,8 @@
 # Author: Niko Bleidistel
 # last change: 2026-08-18
 
+# Hint: This is an old file, which is not used anymore. The new file is 'comsol_data_plotting2.py'. Which has fundamentaly changed.
+
 ##############################################################################
 # import packages
 ##############################################################################
