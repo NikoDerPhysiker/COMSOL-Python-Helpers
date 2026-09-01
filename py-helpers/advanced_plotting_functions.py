@@ -155,7 +155,7 @@ def get_SI_prefix(limits: tuple[float, float], use_u_as_micro: bool = False, bm:
         # Returns the key, or None if the value doesn't exist
         siprefix = next((k for k, v in PREFIX_TO_EXPONENT.items() if v == xsi_exponent), None)
         if bm and siprefix is not None:
-            siprefix = r"\bm{" + siprefix.strip("$") + "}"  # Add bold math formatting to the SI prefix
+            siprefix = r"\bm{" + siprefix + "}"  # Add bold math formatting to the SI prefix
         return siprefix, xsi_exponent, exponent_diff
 
 ##############################################################################
@@ -187,158 +187,256 @@ def prefixes_notation(fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes, a
 
 ##############################################################################
 
-def set_prefix_in_label(string: str, prefix: str):
-        """
-        Inserts the SI prefix into the string behind the first occurrence of an opening rectangular bracket.
-        If no rectangular bracket is found, it searches an opening round bracket.
-        If no bracket is found, the prefix is appended to the end of the string.
+def _contains_prefix_in_unit(unit_text: str, prefix: str) -> bool:
+    """Return True only when the unit already includes a real SI prefix, not just the base unit itself."""
+    if not unit_text or not prefix:
+        return False
 
-        Args:
-            string (str): The input string where the prefix will be inserted.
-            prefix (str): The SI prefix to insert.
-        
-        Returns:
-            str: The modified string with the SI prefix inserted.
-        """
-        # if re.search(r"$\[\w", string):
-            # return re.sub(r"\[(?=\w)", f"[{prefix}", string)
-        if r"$[" in string:
-            return string.replace("$[", f"$[{prefix}")
-        # elif re.search(r"$\(\w", string):
-            # return re.sub(r"\((?=\w)", f"({prefix}", string)
-        elif r"$(" in string:
-            return string.replace("$(", f"$({prefix}")
-        else:
-            return f"{string} [{prefix}1]"
+    def normalize(value: str) -> str:
+        value = value.strip().replace("$", "")
+        value = value.replace(r"\mathrm{", "")
+        value = value.replace(r"\text{", "")
+        value = value.replace(r"\bm{", "")
+        value = value.replace(r"\upmu", "μ").replace(r"\mu", "μ")
+        value = value.replace("{", "").replace("}", "")
+        value = value.replace("[", "").replace("]", "")
+        value = value.replace("(", "").replace(")", "")
+        return value.strip()
+
+    norm_unit = normalize(unit_text)
+    norm_prefix = normalize(prefix)
+    if not norm_prefix:
+        return False
+    if norm_unit == norm_prefix:
+        return False
+    return norm_unit.startswith(norm_prefix) and len(norm_unit) > len(norm_prefix)
+
+
+def set_prefix_in_label(string: str, prefix: str):
+    """Insert the SI prefix into the first bracketed unit block without duplicating it on repeated calls."""
+    if not string or not prefix:
+        return string
+
+    match = re.search(r"\[[^\]]*\]|\([^)]*\)", string)
+    if match is None:
+        return f"{string} [{prefix}]"
+
+    full_match = match.group(0)
+    inner = full_match[1:-1]
+    if _contains_prefix_in_unit(inner, prefix):
+        return string
+
+    updated = full_match.replace(inner, f"{prefix}{inner}", 1)
+    return string[:match.start()] + updated + string[match.end():]
 
 ##############################################################################
 
+def _insert_prefix_into_unit(unit_text: str, prefix: str) -> str:
+    """Insert a prefix into a unit while preserving the surrounding brackets and LaTeX content."""
+    if not unit_text or not prefix:
+        return unit_text
+
+    value = unit_text.strip()
+    if value.startswith("$") and value.endswith("$"):
+        value = value[1:-1].strip()
+
+    if value.startswith("[") and value.endswith("]"):
+        return f"[{prefix}{value[1:-1]}]"
+    if value.startswith("(") and value.endswith(")"):
+        return f"({prefix}{value[1:-1]})"
+    return f"[{prefix}{value}]"
+
+
 def set_prefix_in_number_unit_string(string: str, bm: bool = False) -> str:
-    """
-    Searches the pattern '= number [' in the string. Then it extracts the number and uses  
-    Args:
-        string (str): The input string containing the number and unit.
-        bm (bool): Whether to use bold math formatting for the SI prefix. Default is False.
-    """
-    pattern = r"(=\s*)(-?\d+\.?\d*(?:[eE][-+]?\d+)?)(?=\s*\[)"
-    # matches the pattern '= number [' in the string, where 'number' can be an integer or a float (including scientific notation).
-    # (=\s*) matches the equal sign followed by optional whitespace and captures it as group 1.
-    # (-?\d+\.?\d*(?:[eE][-+]?\d+)?) matches the number (including optional scientific notation) and captures it as group 2.
-    # # -?\d+\.?\d* matches an optional negative sign, followed by one or more digits, an optional decimal point, and zero or more digits.
-    # # (?:[eE][-+]?\d+)? matches an optional scientific notation part, which consists of 'e' or 'E', an optional sign, and one or more digits.
-    # (?=\s*\[) is a positive lookahead that ensures the number is followed by optional whitespace and an opening square bracket, but does not include it in the match.
-    
-    match = re.search(pattern, string)
-    if match:
-        prefix_part = match.group(1) # the '=' and any optional whitespace before the number
-        number_str = match.group(2)  # the number in float format or scientific notation
-        number = float(number_str) # convert matched number from string to float
-        
-        # get the prefix
-        siprefix, xsi_exponent, exponent_diff = get_SI_prefix((number, number), bm=bm)
-        
-        if siprefix is not None:
-            # scale the number according to the SI prefix exponent
-            scaled_number = number * (10 ** (-xsi_exponent))
-            scaled_str = f"{scaled_number:g}"
-            
-            # replace the matched pattern in the string with the scaled number
-            string = re.sub(pattern, rf"{prefix_part}{scaled_str}", string, count=1)
-            
-            # insert the SI prefix into the string behind opening rectangular bracket 
-            string = string.replace("[", f"[{siprefix}")
-            
-    return string
+    """Scale a numeric value to a suitable SI prefix and insert the prefix into the corresponding unit."""
+    if '=' not in string:
+        return string
+
+    left, right = string.split('=', 1)
+    left = left.strip()
+    value_part = right.strip()
+
+    already_single_math_block = value_part.startswith("$") and value_part.endswith("$") and "$" not in value_part[1:-1]
+    if already_single_math_block:
+        return string
+
+    outer_math_wrapped = value_part.startswith("$") and value_part.endswith("$")
+    if outer_math_wrapped:
+        # Only strip if this is a single math block (no $ in the middle)
+        # Multiple blocks like "$-3e-06$ $[m]$" have $ in the middle
+        inner = value_part[1:-1]
+        if "$" not in inner:  # No $ in the middle means it's a single block
+            value_part = inner.strip()
+        else:
+            outer_math_wrapped = False  # Multiple blocks, don't strip outer $
+
+    match = re.search(
+        r"(?P<number>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))?",
+        value_part,
+    )
+    if match is None or match.group("number") == "":
+        return string
+
+    # There is already a single math block around this number, e.g. '$13.0$' or '$13.0$, left_out_lines = $0$'.
+    # Reprocessing would create '$$13.0$$' and break LaTeX parsing.
+    if match.start() > 0 and value_part[match.start() - 1] == "$" and match.end() < len(value_part) and value_part[match.end()] == "$":
+        return string
+    if match.start() == 1 and value_part.startswith("$") and value_part.endswith("$") and "$" not in value_part[1:-1]:
+        return string
+
+    number_str = match.group("number")
+    unit_text = match.group("unit")
+    number = float(number_str)
+
+    if unit_text is None:
+        replacement = f"${number_str}$"
+        updated_value_part = value_part[:match.start()] + replacement + value_part[match.end():]
+        updated_value_part = updated_value_part.strip()
+        if match.start() == 0 and value_part[match.end():].strip().startswith(","):
+            updated_value_part = replacement + value_part[match.end():].strip()
+        return f"{left} = {updated_value_part}".strip()
+
+    siprefix, xsi_exponent, _ = get_SI_prefix((number, number), bm=bm)
+    if siprefix is None or _contains_prefix_in_unit(unit_text, siprefix):
+        return string
+
+    scaled_number = number * (10 ** (-xsi_exponent))
+    scaled_str = f"{scaled_number:g}"
+    replacement = f"{scaled_str}{_insert_prefix_into_unit(unit_text, siprefix)}"
+    updated_value_part = value_part[:match.start()] + replacement + value_part[match.end():]
+    updated_value_part = updated_value_part.strip()
+
+    if outer_math_wrapped:
+        updated_value_part = f"${updated_value_part}$"
+    elif match.start() == 0 and value_part[match.end():].strip().startswith(","):
+        # Keep a trailing comma outside the math block, e.g. 'z = $-3.5[\mathrm{\upmu}m]$, automatic'
+        updated_value_part = f"${replacement}$" + value_part[match.end():].strip()
+
+    return f"{left} = {updated_value_part}".strip()
 
 ##############################################################################
 ##############################################################################
 
 def get_formula_unit(string: str) -> tuple[str, str]:
-    """
-    Searches for a formula and a unit in the given string. 
-    The formula is expected to be enclosed in dollar signs '$', 
-    and the unit is expected to be enclosed in either square brackets '[]' or round brackets '()'.
-
-    Args:
-        string (str): The input string containing the formula and unit.
-
-    Returns:
-        tuple[str, str]: A tuple containing the extracted formula and unit. 
-                         If no unit is found, returns empty strings for unit.
-                         If no formula is found, returns the entire string but the unit as the formula.
-    """
+    """Extract the math symbol and any trailing unit from a label-like string."""
     value = string.strip()
+    if not value:
+        return "", ""
 
-    # 1. Search for square brackets at the end of the string, e.g., [m]
-    unit_match = re.search(r"(\[.*?\])$", value)
-    
-    # 2. Fallback: Search for round brackets at the end, e.g., (m)
-    if not unit_match:
-        unit_match = re.search(r"(\(.*?\))$", value)
-        
+    unit = ""
+    formula_search_part = value
+
+    # Strip a final bracketed unit only when it belongs to the label tail, not to the math formula itself.
+    unit_match = re.search(r"(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))\s*$", value)
     if unit_match:
-        full_unit_string = unit_match.group(1)
-        # Remove the outer brackets (works for both [ ] and ( ))
-        unit = full_unit_string[1:-1].strip()
-    else:
-        full_unit_string = ""
-        unit = ""
-        
-    # Get formula from the string, e.g., "$x$" or "$|\vec{B}|$"
-    math_blocks = re.findall(r"(\$.*?\$)", value)
-    if math_blocks:
-        short = math_blocks[-1]
-    else:
-        # Fallback: if no math block is found, use the whole string without the unit
-        short = value
-        if full_unit_string:
-            short = short.replace(full_unit_string, "")
-        short = short.strip("[]()").strip()
+        unit_text = unit_match.group("unit").strip()
+        if unit_text.startswith("$") and unit_text.endswith("$") and "$" not in unit_text[1:-1]:
+            unit = unit_text[1:-1].strip()
+        else:
+            unit = unit_text.strip("[]() ")
+        formula_search_part = value[:unit_match.start()].strip()
 
-    return short, unit
+    if not formula_search_part:
+        return "", unit.strip()
+
+    # Preserve translated math blocks exactly as written.
+    math_block_match = re.search(r"\$[^$]+\$", formula_search_part)
+    if math_block_match:
+        return math_block_match.group(0).strip(), unit.strip()
+
+    plain = formula_search_part.strip("[]() ").strip()
+    return plain.strip(), unit.strip()
+
 
 ##############################################################################
 
+def clean_label_text(text: str) -> str:
+    """Strip accidental outer math wrappers from pure text fragments while leaving numeric label values untouched."""
+    value = (text or "").strip()
+    if not value:
+        return value
+
+    if value.startswith("$") and value.endswith("$") and "$" not in value[1:-1]:
+        value = value[1:-1].strip()
+
+    if "=" not in value:
+        return value
+
+    left, right = value.split("=", 1)
+    left = left.strip()
+    right = right.strip()
+    if re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", right):
+        return value
+    return f"{left} = {right}".strip()
+
+
 def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | None = None, bm: bool = False) -> str:
-    """
-    Translates the variable in the label using the provided translation dictionary and applies SI prefix notation.
-
-    The label is expected to be in the format "variable = value [unit]".
-    If a translation dictionary is provided and the variable is found in it, the variable will be replaced with its corresponding translation.
-    If there is a unit in the (now translated) variable -- marked by either round or square brackets -- and no unit behind the value, the unit will be moved behind the value.
-    The function also applies SI prefix notation to the value, meaning that the magnitude of the value will be adjusted to a suitable SI prefix, and the prefix will be added to the unit.
-
-    Args:
-        label (str):    The input label string, expected to be in the format "variable = value [unit]".
-        translation_dict (dict[str, str] | None): A dictionary for translating variable names. Default is None.
-        bm (bool): Whether to use bold math notation for the label. Default is False.
-    Returns:
-        str: The translated and prefixed label.
-    """
-
-    # split the label into variable and rest
+    """Translate the label and apply SI prefixing without disturbing LaTeX math blocks."""
     if '=' not in label:
+        translated = label
         if translation_dict is not None and label in translation_dict:
-            label = translation_dict[label]
-        return label
-    else:
-        label_parts = label.strip().split('=')  # split the label at '=' 
-        variable = label_parts[0].strip()       # get the variable name
-        rest = '='.join(label_parts[1:]) if len(label_parts) > 1 else ''  # get the rest of the label after '='
+            translated = translation_dict[label]
+        return clean_label_text(translated).strip()
+
+    left, right = label.split('=', 1)
+    variable = left.strip()
+    rest = right.strip()
 
     if translation_dict is not None and variable in translation_dict:
         variable = translation_dict[variable]
-   
-    # get the short name and unit for the variable
-    short, unit = get_formula_unit(variable)
 
-    # if the rest of the label does not contain a unit and a unit is available, append the unit to the rest of the label
-    _ , unit_rest = get_formula_unit(rest)
-    if unit_rest == '' and unit != '':
-        rest = f"{rest} [{unit}]"
+    explicit_math_label = bool(re.search(r"\$.*?\$", variable or ""))
 
-    short_label = f"{short} = {rest}"
-    return set_prefix_in_number_unit_string(short_label, bm=bm)
+    if explicit_math_label:
+        unit_match = re.search(r"(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))\s*$", variable.strip())
+        if unit_match:
+            unit_text = unit_match.group("unit").strip()
+            if unit_text.startswith("$") and unit_text.endswith("$") and "$" not in unit_text[1:-1]:
+                unit_text = unit_text[1:-1].strip()
+            variable = variable[:unit_match.start()].rstrip()
+            if rest and not re.search(r"\[[^\]]*\]|\([^)]*\)", rest):
+                rest = f"{rest}{unit_text}".strip()
+        result = f"{variable.strip()} = {rest}".strip()
+    else:
+        short, unit = get_formula_unit(variable)
+        if not short:
+            short = variable.strip()
+
+        if unit and not re.search(r"\[[^\]]*\]|\([^)]*\)", rest):
+            rest = f"{rest} [{unit}]".strip()
+
+        result = f"{short} = {rest}".strip()
+
+    result = set_prefix_in_number_unit_string(result, bm=bm).strip()
+
+    def _is_numeric_value_only(text: str) -> bool:
+        """Return True only for a true numeric value expression, not for mixed text like '..., automatic'."""
+        value = text.strip()
+        if not value:
+            return False
+        if value.startswith("$") and value.endswith("$"):
+            value = value[1:-1].strip()
+        unit_pattern = r"(?:\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))?"
+        numeric_pattern = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
+        return bool(re.fullmatch(rf"{numeric_pattern}\s*{unit_pattern}", value))
+
+    if '=' in result:
+        left_expr, right_expr = result.split('=', 1)
+        left_expr = left_expr.strip()
+        right_expr = right_expr.strip()
+
+        # Only wrap if the whole right-hand side is a single numeric value block.
+        # Mixed text like 'z = -3.5[μm], automatic' must remain plain text.
+        # Do not add another $...$ layer when the value is already a single math block.
+        if right_expr and _is_numeric_value_only(right_expr):
+            if not (right_expr.startswith("$") and right_expr.endswith("$") and "$" not in right_expr[1:-1]):
+                right_stripped = right_expr
+                if right_stripped.startswith("$") and right_stripped.endswith("$"):
+                    right_stripped = right_stripped[1:-1].strip()
+                if not right_stripped.startswith("$") and not right_stripped.endswith("$"):
+                    result = f"{left_expr} = ${right_stripped}$".strip()
+
+    return result
 
 
 ##############################################################################
