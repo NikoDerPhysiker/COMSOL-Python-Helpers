@@ -1142,7 +1142,8 @@ def zaxis_plot(
         # Data
         for lidx, left_out_lines in enumerate(left_out_lines_list):
             for midx, iteration in enumerate(iterations):
-                df_plot = list_df[midx][[xparam, yparam]].copy()
+                dfidx = lidx*len(iterations) + midx
+                df_plot = list_df[dfidx][[xparam, yparam]].copy()
 
                 color = get_color(lidx, len(left_out_lines_list), 0, 1, midx, len(iterations))
 
@@ -1347,8 +1348,9 @@ def yaxis_plot(
         for lidx, left_out_lines in enumerate(left_out_lines_list):
             for zidx, z_value in enumerate(plot_z):
                 for midx, iteration in enumerate(iterations):
-                    df_plot = list_df[midx][[xparam, yparam]].copy()
-                    mask = list_df[midx]["z"] == z_value
+                    dfidx = lidx*len(iterations) + midx
+                    df_plot = list_df[dfidx][[xparam, yparam]].copy()
+                    mask = list_df[dfidx]["z"] == z_value
                     df_plot = df_plot[mask]
                     mask = df_plot[xparam].abs() <= width_limit
                     df_plot = df_plot[mask]
@@ -1553,8 +1555,9 @@ def xaxis_plot(
         for lidx, left_out_lines in enumerate(left_out_lines_list):
             for zidx, z_value in enumerate(plot_z):
                 for midx, iteration in enumerate(iterations):
-                    df_plot = list_df[midx][[xparam, yparam]].copy()
-                    mask = list_df[midx]["z"] == z_value
+                    dfidx = lidx*len(iterations) + midx
+                    df_plot = list_df[dfidx][[xparam, yparam]].copy()
+                    mask = list_df[dfidx]["z"] == z_value
                     df_plot = df_plot[mask]
                     mask = df_plot[xparam].abs() <= length_limit
                     df_plot = df_plot[mask]
@@ -1767,7 +1770,8 @@ def xyplane_plot(
 
         for lidx, left_out_lines in enumerate(left_out_lines_list):
             for midx, iteration in enumerate(iterations):
-                df_plot = list_df[midx][[xparam, yparam, zparam]].copy()
+                dfidx = lidx*len(iterations) + midx
+                df_plot = list_df[dfidx][[xparam, yparam, zparam]].copy()
                 df_plot = df_plot.dropna()
                 df_plot = df_plot[(df_plot[xparam].abs() <= length_limit) & (df_plot[yparam].abs() <= width_limit)]
 
@@ -1917,8 +1921,8 @@ def angle_error_plot(
             for zidx, z_value in enumerate(plot_z):
                 df_plot = pd.DataFrame()
                 for midx, iteration in enumerate(iterations):
-                    idx = lidx * len(iterations) + midx
-                    df_temp = list_df[idx].copy()
+                    dfidx = lidx*len(iterations) + midx
+                    df_temp = list_df[dfidx].copy()
 
                     mask = df_temp["z"] == z_value
                     Bx = float(df_temp.loc[mask, "mf.Bx (T)"].iloc[0])
@@ -1985,7 +1989,7 @@ def angle_error_plot(
                             # paths
                             input_folder = input_folder, 
                             modelfolder = modelfolder,
-                            modelname = modelnames[lidx],
+                            modelname = modelnames[midx],
                             data_export = data_export,
                             sweep_dict = sweep_dict,
             
