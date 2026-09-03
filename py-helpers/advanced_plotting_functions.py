@@ -25,6 +25,7 @@ from typing import Literal, cast
 
 import matplotlib.axes
 import matplotlib.figure
+import matplotlib.text
 from matplotlib.markers import MarkerStyle
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
@@ -605,16 +606,8 @@ def plot_background(
     if y_label is not None:
         ax.set_ylabel(y_label)
 
-    # show title, legend and grid
     if title is not None:
-        if "(" in title:
-            main_title = title.split("(")[0].strip()
-            subtitle = "(" + title.split("(")[1].strip()
-        else:
-            main_title = title
-            subtitle = ""
-
-        ax.set_title(rf"\textbf{{{main_title}}}"+"\n\n"+rf"{{{subtitle}}}", pad=20)
+        ax.set_title(title, pad=20,)
 
     ax.set_axisbelow(True)  # Ensure grid is below other plot elements
     ax.grid(True, which='both', linestyle='--', zorder=0)
@@ -622,6 +615,137 @@ def plot_background(
     return fig, ax
 
 ##############################################################################
+##############################################################################
+
+def set_wrapped_title(
+        fig: matplotlib.figure.Figure,
+        ax: matplotlib.axes.Axes,
+        title: str | None = None,
+        y: float = 0.98,
+        gap_in: float = 0.2,          # gap between main title and subtitle
+        linespacing: float | None = None,  # None -> auto (depends on textsize and line count)
+        width_tolerance: float = 1.0,
+    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list[matplotlib.text.Text]]:
+    """
+    Sets the title as TWO separate text artists:
+      1. Main title (before "("), bold, in axes.titlesize, on top.
+      2. Subtitle (bracket content without the brackets), regular FONTSIZE,
+         below it -- wrapped at commas if needed.
+
+    Returns a list of both created text artists (empty if no title was set),
+    so that finalize_layout/save_figure can correctly include their height.
+
+    If linespacing is None, it is chosen automatically: a compact value for
+    a single-line subtitle, and a larger, textsize-dependent value once the
+    subtitle wraps onto multiple lines (larger fonts need proportionally
+    more line spacing to stay readable).
+    """
+    if title is None:
+        title = ax.get_title()
+        ax.set_title("")
+
+    if not title:
+        return fig, ax, []
+
+    titlecolor = plt.rcParams.get("axes.titlecolor", MAINCOLOR)
+    titlesize = plt.rcParams.get("axes.titlesize", FONTSIZE)
+    textsize = plt.rcParams.get("font.size", FONTSIZE)
+
+    if isinstance(titlesize, str):
+        titlesize = FONTSIZE
+
+    if isinstance(textsize, str):
+        textsize = FONTSIZE
+
+    if "(" not in title:
+        main_artist = fig.suptitle(rf"\textbf{{{title}}}", y=y)
+        return fig, ax, [main_artist]
+
+    main_title = title.split("(", 1)[0].strip()
+    subtitle_content = title.split("(", 1)[1].rsplit(")", 1)[0].strip()
+
+    fig_width_in, _ = fig.get_size_inches()
+    max_width_in = fig_width_in * width_tolerance
+
+    fig.canvas.draw()
+    renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+
+    def render_width_in(text: str, fontsize: float) -> float:
+        # invisible text artist used only to measure the rendered width
+        t = fig.text(0, 0, rf"{{{text}}}", alpha=0.0, fontsize=fontsize)
+        fig.canvas.draw()
+        bbox = t.get_window_extent(renderer)
+        t.remove()
+        return bbox.width / fig.dpi
+
+    segments = [s.strip() for s in subtitle_content.split(",")]
+
+    if len(segments) <= 1 or render_width_in(subtitle_content, textsize) <= max_width_in:
+        wrapped_content = subtitle_content
+    else:
+        # Special rule: if the first segment contains no "$" (i.e. plain
+        # text such as "Round coil and grid" instead of a formula), check
+        # whether isolating it on its own line is actually needed -- only
+        # do so if the remaining segments would not fit on one line anyway.
+        isolate_first = False
+        if "$" not in segments[0] and len(segments) > 1:
+            rest_text = ", ".join(segments[1:])
+            if render_width_in(rest_text, textsize) > max_width_in:
+                isolate_first = render_width_in(segments[0] + ",", textsize) <= max_width_in
+
+        lines: list[list[str]] = [[segments[0]]] if isolate_first else [[]]
+        remaining = segments[1:] if isolate_first else segments
+
+        # Greedy packing: fit as many segments as possible per line
+        for seg in remaining:
+            candidate_line = lines[-1] + [seg]
+            candidate_text = ", ".join(candidate_line)
+
+            if lines[-1] and render_width_in(candidate_text, textsize) > max_width_in:
+                lines.append([seg])
+            else:
+                lines[-1] = candidate_line
+
+        joined_lines = [", ".join(line) for line in lines]
+        for j in range(len(joined_lines) - 1):
+            joined_lines[j] += ","
+        wrapped_content = "\n".join(joined_lines)
+
+    # 1. Set the main title (bold, titlesize) and measure its position
+    main_artist = fig.suptitle(rf"\textbf{{{main_title}}}", y=y, fontsize=titlesize, color=titlecolor)
+    fig.canvas.draw()
+    main_bbox = main_artist.get_window_extent(renderer)
+    main_bottom_in = main_bbox.y0 / fig.dpi
+
+    # 2. Compute subtitle y-position: gap_in below the main title
+    fig_height_in = fig.get_size_inches()[1]
+    sub_y_fig = (main_bottom_in - gap_in) / fig_height_in
+
+    # 3. Auto-determine linespacing if not explicitly provided:
+    #    a single-line subtitle can stay compact, but a wrapped
+    #    (multi-line) subtitle needs more room, scaled by textsize so
+    #    larger fonts get proportionally more spacing.
+    min_linespacing = 0.8
+    if linespacing is None:
+        n_lines = wrapped_content.count("\n") + 1
+        if n_lines > 1:
+            linespacing = min_linespacing + 0.03 * textsize
+        else:
+            linespacing = min_linespacing
+
+    # For a multi-line subtitle: verticalalignment='top' ensures sub_y_fig
+    # marks the TOP edge of the subtitle block
+    sub_artist = fig.text(
+        0.5, sub_y_fig, wrapped_content,
+        ha='center', va='top',
+        fontsize=textsize,
+        linespacing=linespacing,
+        color=titlecolor,
+    )
+    fig.canvas.draw()
+
+    return fig, ax, [main_artist, sub_artist]
+
 ##############################################################################
 
 def dynamic_legend(
@@ -642,7 +766,7 @@ def dynamic_legend(
         fraction (float):                   Fraction of the page width to use for the legend.
         max_columns (int):                  Maximum number of columns in the legend.
         width_tolerance (float):            Tolerance factor for the maximum allowed legend width relative to the figure width.
-    
+
     Returns:
         tuple (Figure, Axes): A tuple containing the updated matplotlib figure and axes objects.
     """
@@ -653,7 +777,7 @@ def dynamic_legend(
     if n_entries == 0:
         return fig, ax
 
-    # 2. Rule 1: Check if the legend entries alternate between scatter and line plots 
+    # 2. Rule 1: Check if the legend entries alternate between scatter and line plots
     # and change the order of the legend entries so that scatter entries are on the left and line entries are on the right.
     is_scatter = [isinstance(h, PathCollection) for h in handles]
 
@@ -678,7 +802,7 @@ def dynamic_legend(
         test_ncol_range = range(ncol_start, n_entries + 1, 1)
 
     # limit the number of columns to the maximum allowed
-    if n_entries % (max_columns+1) == 0:
+    if n_entries % (max_columns + 1) == 0:
         max_columns = max_columns + 1
     test_ncol_range = [ncol for ncol in test_ncol_range if ncol <= max_columns]
 
@@ -686,7 +810,7 @@ def dynamic_legend(
     fig_width_pts = fig.get_size_inches()[0] * 72
     allowed_max_width_pts = fig_width_pts * width_tolerance
 
-    # Vorhandene Legende entfernen, damit sie die Messung nicht verfaelscht
+    # Remove the existing legend so it does not distort the measurement
     existing_legend = ax.get_legend()
     if existing_legend is not None:
         existing_legend.remove()
@@ -703,7 +827,7 @@ def dynamic_legend(
             ncol=test_ncol,
         )
         fig.canvas.draw()
-        # fig.canvas is at runtime an Agg-based canvas (Agg, TkAgg, Qt5Agg, ...); 
+        # fig.canvas is at runtime an Agg-based canvas (Agg, TkAgg, Qt5Agg, ...);
         # FigureCanvasBase itself does not declare get_renderer(), hence the cast for the type checker.
         renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
         legend_width_pts = trial_legend.get_window_extent(renderer).width / fig.dpi * 72
@@ -726,35 +850,38 @@ def dynamic_legend(
     return fig, ax
 
 ##############################################################################
-##############################################################################
 
 def finalize_layout(
-        fig: matplotlib.figure.Figure,
-        ax: matplotlib.axes.Axes,
+        fig, ax,
         left_in: float = LEFT_LABEL_SPACE,
         right_in: float = RIGHT_LABEL_SPACE,
-    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
+        aspect_ratio: float | None = None,
+        title_artists: list[matplotlib.text.Text] | None = None,
+    ):
     """
-    Finalizes the layout of the figure and axes. This function calculates the appropriate figure height based on the golden ratio 
-    and adjusts the axes position accordingly. It also takes into account any extra artists (like legends) that may affect the tight bounding box of the figure.
+    Forces a fixed width and a fixed aspect ratio for the axes box (plot
+    area, not the whole figure). Only the total figure height is adjusted
+    afterwards, to leave room for the title, x-label, and legend.
 
     Args:
-        fig (matplotlib.figure.Figure): The matplotlib figure object.
-        ax (matplotlib.axes.Axes): The matplotlib axes object.
-        left_in (float): The left margin in inches.
-        right_in (float): The right margin in inches.
+        aspect_ratio: height / width ratio of the axes box. Defaults to the
+            golden ratio if not provided.
+        title_artists: list of title-related text artists (e.g. from
+            set_wrapped_title) whose height must be taken into account
+            manually, since they are figure-level artists and are not
+            reliably included by Figure.get_tightbbox().
 
-    Returns:
-        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]: The updated figure and axes objects.
+    Must be called AFTER dynamic_legend and set_wrapped_title.
     """
-    golden_ratio = (5 ** 0.5 - 1) / 2
-    fig_width_in, _ = fig.get_size_inches()
-
-    axes_width_in = fig_width_in - left_in - right_in
-    axes_height_in = axes_width_in * golden_ratio
+    if aspect_ratio is None:
+        aspect_ratio = (5 ** 0.5 - 1) / 2  # golden ratio
 
     fig.canvas.draw()
     renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+
+    fig_width_in, _ = fig.get_size_inches()
+    axes_width_in = fig_width_in - left_in - right_in
+    axes_height_in = axes_width_in * aspect_ratio
 
     extra_artists = []
     legend = ax.get_legend()
@@ -767,11 +894,13 @@ def finalize_layout(
     top_in = max(0.0, (tight_bbox.y1 - ax_bbox.y1) / fig.dpi)
     bottom_in = max(0.0, (ax_bbox.y0 - tight_bbox.y0) / fig.dpi)
 
+    # Title artists are not ax children -> include them explicitly
+    for artist in (title_artists or []):
+        bbox = artist.get_window_extent(renderer)
+        artist_top_in = max(0.0, (bbox.y1 - ax_bbox.y1) / fig.dpi)
+        top_in = max(top_in, artist_top_in)
+
     new_fig_height_in = axes_height_in + top_in + bottom_in
-    assert new_fig_height_in > 0, (
-        f"invalid figure height: axes_height_in={axes_height_in}, "
-        f"top_in={top_in}, bottom_in={bottom_in}"
-    )
     fig.set_size_inches(fig_width_in, new_fig_height_in, forward=True)
 
     left = left_in / fig_width_in
@@ -783,24 +912,30 @@ def finalize_layout(
     fig.canvas.draw()
     return fig, ax
 
+##############################################################################
+
 def position_ylabel_left(fig, ax, x_in: float = (LEFT_LABEL_SPACE - 0.5)):
     """
-    Positions the y-axis label at a fixed horizontal position (in inches from the left edge of the figure). 
-    The tick numbers remain unchanged directly on the axis. This function must be called after finalize_layout, as it requires the final axis position.
+    Positions the y-axis label at a fixed horizontal position (in inches
+    from the left edge of the figure). The tick numbers remain unchanged,
+    directly on the axis. Must be called AFTER finalize_layout, since it
+    requires the final axis position.
     """
     fig_width_in, _ = fig.get_size_inches()
-    ax_pos = ax.get_position()  
+    ax_pos = ax.get_position()
 
     x_fig = x_in / fig_width_in
-    x_axes = (x_fig - ax_pos.x0) / ax_pos.width 
+    x_axes = (x_fig - ax_pos.x0) / ax_pos.width
 
     ax.yaxis.set_label_coords(x_axes, 0.5)
     return fig, ax
 
+##############################################################################
+
 def position_legend(fig, ax, gap_in: float = 0.05):
     """
-    Positions the legend under the x-axis label with a fixed gap (in inch).
-    Needs to be called AFTER finalize_layout.
+    Positions the legend under the x-axis label with a fixed gap (in inches).
+    Must be called AFTER finalize_layout.
     """
     legend = ax.get_legend()
     if legend is None:
@@ -819,48 +954,40 @@ def position_legend(fig, ax, gap_in: float = 0.05):
     fig.canvas.draw()
     return fig, ax
 
-def save_figure(
-        fig: matplotlib.figure.Figure,
-        ax: matplotlib.axes.Axes,
-        path: Path | str,
-        pad_inches: float = 0.025,
-        ):
-    """
-    Saves the given figure to a PDF file in the specified output folder with a fixed width and a height.
+##############################################################################
 
-    sugested workflow:
-    fig, ax = apf.plot_background(fig, ax, ...)
-    fig, ax = apf.dynamic_legend(fig, ax)
-    fig, ax = apf.finalize_layout(fig, ax)
-    fig, ax = apf.position_ylabel_left(fig, ax)
-    fig, ax = apf.position_legend(fig, ax)
-    apf.save_figure(fig, ax, path)
+def save_figure(fig, ax, path, pad_inches: float = 0.05, title_artists: list[matplotlib.text.Text] | None = None):
     """
-
-    fig.canvas.draw() 
+    Saves the figure to a PDF file. The width is fixed to the current
+    figure width; the height is cropped tightly around the actual content
+    (axes, legend, and title artists), plus pad_inches of padding.
+    """
+    fig.canvas.draw()
     renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
 
-    # old figurewidth
     fig_width_in, _ = fig.get_size_inches()
 
-    # get the tight bounding box of the figure including all artists (like legends, labels, etc.)
-    tight_bbox = fig.get_tightbbox(renderer)
+    extra_artists = []
+    legend = ax.get_legend()
+    if legend is not None:
+        extra_artists.append(legend)
 
-    # x: set [0, fig_width_in] -> ficed with
-    # y: bbox thicht "tight" -> variable height
-    x0, x1 = 0.0, fig_width_in
+    tight_bbox = fig.get_tightbbox(renderer, bbox_extra_artists=extra_artists)
+
     y0 = tight_bbox.y0 - pad_inches
     y1 = tight_bbox.y1 + pad_inches
 
-    bbox = Bbox.from_extents(x0, y0, x1, y1)
+    # Title artists are not reliably included in get_tightbbox -> account
+    # for them explicitly
+    for artist in (title_artists or []):
+        bbox = artist.get_window_extent(renderer)
+        y1 = max(y1, bbox.y1 / fig.dpi + pad_inches)
 
-    fig.savefig(
-        str(path) + ".pdf",
-        bbox_inches=bbox,
-        dpi=300,
-        backend='pdf',
-    )
+    x0, x1 = 0.0, fig_width_in
+    bbox = Bbox.from_extents(x0, y0, x1, y1)
+    fig.savefig(str(path) + ".pdf", bbox_inches=bbox, dpi=300, backend='pdf')
     plt.show(fig)
+    # plt.close(fig)
 
 ##############################################################################
 ##############################################################################
