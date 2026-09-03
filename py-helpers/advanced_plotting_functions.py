@@ -17,6 +17,9 @@ from matplotlib import ticker
 from matplotlib.collections import PathCollection
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
+from matplotlib.transforms import Bbox
+import matplotlib.transforms as mtransforms
+
 # for type hinting
 from typing import Literal, cast
 
@@ -37,11 +40,14 @@ FONTSIZE = 12           # in pt, of the latex document
 TEXTWIDTH = 455.24411   # in pt, of the latex document
 TEXTHEIGHT = 635.25946  # in pt, of the latex document
 
-MARKERSIZE = 5         # of the plot markers
+MARKERSIZE = 4         # of the plot markers
 
 MAINCOLOR = (0/255, 51/255, 102/255)            # color of the title = FAU-Blau
 SECONDARYCOLOR = (190/255, 205/255, 220/255)    # Light blue
 BACKGROUNDCOLOR = (225/255, 225/255, 225/255)   # Light gray
+
+LEFT_LABEL_SPACE = 1.20 # inches, space to the left of the y-axis label for long labels with units
+RIGHT_LABEL_SPACE = 1.20
 
 ##############################################################################
 # style settings
@@ -63,8 +69,9 @@ plt.rcParams.update({
 })
 
 plt.rcParams.update({
-    "font.size": FONTSIZE,                
-    "axes.labelsize": FONTSIZE,
+    "font.size": FONTSIZE,
+    "axes.titlesize": 1.2 * FONTSIZE,                
+    "axes.labelsize": 1.0 * FONTSIZE,
     "legend.fontsize": 0.9 * FONTSIZE,
     "xtick.labelsize": 0.8 * FONTSIZE,
     "ytick.labelsize": 0.8 * FONTSIZE,
@@ -96,416 +103,6 @@ plt.rcParams.update({
 # string formaters
 ##############################################################################
 ##############################################################################
-
-
-
-
-
-
-
-
-
-
-
-# def get_SI_prefix(limits: tuple[float, float], use_u_as_micro: bool = False, bm: bool = False) -> tuple[str | None, int, int]:
-#         """
-#         Returns the SI prefix for a given numeric value.
-        
-#         Args:
-#             limits (tuple[float, float]): A tuple containing the minimum and maximum values.
-#             use_u_as_micro (bool): Whether to use 'u' as the symbol for micro or 'μ'.
-#             bm (bool): Whether to use bold math formatting for the SI prefix.
-        
-#         Returns:
-#             tuple[str|None, int, int]: A tuple containing the SI prefix, the SI exponent, and the exponent difference to the magnitude of the input values.
-#         """
-#         # get the maximum absolute value from the limits
-#         xmax = max(abs(x) for x in limits)
-
-#         # get magnitude of the maximum value
-#         x_base_exponent = math.floor(math.log10(xmax)) if xmax > 0 else 0
-        
-#         # Round down to the nearest multiple of 3 for SI prefix
-#         xsi_exponent = (x_base_exponent // 3) * 3 
-#         exponent_diff = x_base_exponent - xsi_exponent
-
-#         # Define the mapping of SI prefixes to their corresponding exponents
-#         PREFIX_TO_EXPONENT = {
-#             # Large values (positive exponents)
-#             r"\mathrm{Q}": 30,   # Quetta
-#             r"\mathrm{R}": 27,   # Ronna
-#             r"\mathrm{Y}": 24,   # Yotta
-#             r"\mathrm{Z}": 21,   # Zetta
-#             r"\mathrm{E}": 18,   # Exa
-#             r"\mathrm{P}": 15,   # Peta
-#             r"\mathrm{T}": 12,   # Tera
-#             r"\mathrm{G}": 9,    # Giga
-#             r"\mathrm{M}": 6,    # Mega
-#             r"\mathrm{k}": 3,    # Kilo
-#             r"\mathrm{h}": 2,    # Hecto
-#             r"\mathrm{da}": 1,   # Deca
-
-#             # zero exponent (no prefix)
-#             "": 0,     # No prefix
-            
-#             # Small values (negative exponents)
-#             r"\mathrm{d}": -1,   # Deci
-#             r"\mathrm{c}": -2,   # Centi
-#             r"\mathrm{m}": -3,   # Milli
-#             r"\mathrm{u}": -6,   # Micro (often written as µ)
-#             r"\mathrm{n}": -9,   # Nano
-#             r"\mathrm{p}": -12,  # Pico
-#             r"\mathrm{f}": -15,  # Femto
-#             r"\mathrm{a}": -18,  # Atto
-#             r"\mathrm{z}": -21,  # Zepto
-#             r"\mathrm{y}": -24,  # Yocto
-#             r"\mathrm{r}": -27,  # Ronto
-#             r"\mathrm{q}": -30,   # Quekto
-#         }
-#         if not use_u_as_micro:
-#             # PREFIX_TO_EXPONENT["μ"] = -6   # Use 'μ' for micro instead of 'u'
-#             PREFIX_TO_EXPONENT[r"\mathrm{\upmu}"] = -6   # Use 'μ' for micro instead of 'u'
-#             del PREFIX_TO_EXPONENT[r"\mathrm{u}"]    # Remove 'u' from the dictionary
-
-#         # Returns the key, or None if the value doesn't exist
-#         siprefix = next((k for k, v in PREFIX_TO_EXPONENT.items() if v == xsi_exponent), None)
-#         if bm and siprefix is not None:
-#             siprefix = r"\bm{" + siprefix + "}"  # Add bold math formatting to the SI prefix
-#         return siprefix, xsi_exponent, exponent_diff
-
-# ##############################################################################
-
-# def prefixes_notation(fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes, axis: Literal['x', 'y']):
-#     """
-#     Adjusts the axis labels of a matplotlib plot to use SI prefixes based on the data limits.
-
-#     Args:
-#         fig (matplotlib.figure.Figure): The matplotlib figure object.
-#         ax (matplotlib.axes.Axes): The matplotlib axes object.
-#         axis (Literal['x', 'y']): The axis to adjust ('x' or 'y').
-    
-#     Returns:
-#         tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, str|None, int]: A tuple containing the updated figure and axes objects, the SI prefix used, and the SI exponent.
-#     """
-#     fig.canvas.draw() 
-#     if axis == 'x':
-#         xlimits = ax.get_xlim()
-#         siprefix, xsi_exponent, exponent_diff = get_SI_prefix(xlimits)
-#         scale_factor = 10 ** (-xsi_exponent)
-#         ax.xaxis.set_major_formatter(ticker.FuncFormatter(lambda x, pos: f"{x * scale_factor:g}"))
-#     elif axis == 'y':
-#         ylimits = ax.get_ylim()
-#         siprefix, xsi_exponent, exponent_diff = get_SI_prefix(ylimits)
-#         scale_factor = 10 ** (-xsi_exponent)
-#         ax.yaxis.set_major_formatter(ticker.FuncFormatter(lambda y, pos: f"{y * scale_factor:g}"))
-#     return fig, ax, siprefix, xsi_exponent
-
-# ##############################################################################
-
-# def _contains_prefix_in_unit(unit_text: str, prefix: str) -> bool:
-#     """Return True only when the unit already includes a real SI prefix, not just the base unit itself."""
-#     if not unit_text or not prefix:
-#         return False
-
-#     def normalize(value: str) -> str:
-#         value = value.strip().replace("$", "")
-#         value = value.replace(r"\mathrm{", "")
-#         value = value.replace(r"\text{", "")
-#         value = value.replace(r"\bm{", "")
-#         value = value.replace(r"\upmu", "μ").replace(r"\mu", "μ")
-#         value = value.replace("{", "").replace("}", "")
-#         value = value.replace("[", "").replace("]", "")
-#         value = value.replace("(", "").replace(")", "")
-#         return value.strip()
-
-#     norm_unit = normalize(unit_text)
-#     norm_prefix = normalize(prefix)
-#     if not norm_prefix:
-#         return False
-#     if norm_unit == norm_prefix:
-#         return False
-#     return norm_unit.startswith(norm_prefix) and len(norm_unit) > len(norm_prefix) 
-#     # Return True only if the unit starts with the prefix and is longer than the prefix itself, 
-#     # indicating that it's a real SI prefix and not just the base unit. 
-
-
-# def set_prefix_in_label(string: str, prefix: str):
-#     """Insert the SI prefix into the first bracketed unit block without duplicating it on repeated calls."""
-#     if not string or not prefix:
-#         return string
-
-#     # The regex pattern matches either a square bracketed block [ ... ] or a round bracketed block ( ... ).
-#     match = re.search(r"\[[^\]]*\]|\([^)]*\)", string)
-
-#     # if no match is found, append the prefix in square brackets at the end of the string
-#     if match is None:
-#         return f"{string} [{prefix}1]"
-
-#     # If a match is found, check if the unit already contains the prefix
-#     full_match = match.group(0)
-#     inner = full_match[1:-1]
-#     if _contains_prefix_in_unit(inner, prefix):
-#         return string # Return the original string if the unit already contains the prefix
-
-#     # If the unit does not contain the prefix, insert the prefix at the beginning of the unit
-#     updated = full_match.replace(inner, f"{prefix}{inner}", 1)
-#     return string[:match.start()] + updated + string[match.end():]
-
-# ##############################################################################
-
-# def _insert_prefix_into_unit(unit_text: str, prefix: str) -> str:
-#     """Insert the SI prefix into the unit text, preserving any existing brackets and formatting."""
-#     if not unit_text or not prefix:
-#         return unit_text
-
-#     # Remove leading and trailing whitespace
-#     value = unit_text.strip() 
-
-#     # If the unit is already wrapped in a single math block, strip the outer $...$ for processing
-#     if value.startswith("$") and value.endswith("$"): 
-#         value = value[1:-1].strip()
-
-#     # If the unit is already wrapped in brackets, insert the prefix inside the brackets
-#     if value.startswith("[") and value.endswith("]"):
-#         return f"[{prefix}{value[1:-1]}]"
-#     if value.startswith("(") and value.endswith(")"):
-#         return f"({prefix}{value[1:-1]})"
-
-#     # If the unit is not wrapped in brackets, simply insert the prefix at the beginning of the unit text
-#     return f"[{prefix}{value}]"
-
-
-# def set_prefix_in_number_unit_string(string: str, bm: bool = False) -> str:
-#     """
-#     Insert the appropriate SI prefix into a string containing a numeric value and an optional unit, while preserving any existing LaTeX math formatting.
-#     1. Rule: If the string does not contain an '=', return the original string unchanged.
-#     2. Rule: Else split at the first '=' and process the right part to identify a numeric value and an optional unit.
-#     3. Rule: If a numeric value is found and already wrapped in a single math block, return the original string unchanged.
-#     4. Rule: If no unit is found, wrap the numeric value in a math block and return the updated string.
-#     5. Rule: If a unit and a value is found, determine the appropriate SI prefix based on the magnitude of the number.
-#     6. Rule: If there is no suitable SI prefix or if the unit already contains the prefix, return the original string unchanged.
-#     7. Rule: Else insert the SI prefix into the unit text, preserving any existing brackets and formatting.
-#     8. Rule: If the original string was wrapped in a math block, wrap the updated string in a math block as well.
-#     9. Rule: If there is a trailing comma (+ optional text) after the numeric value, place the math block before the comma and keep the trailing text outside the math block. 
-#     """
-#     if '=' not in string:
-#         return string
-
-#     # Split the string into left and right parts at the first '=', and strip leading/trailing whitespace from both parts
-#     left, right = string.split('=', 1) 
-#     left = left.strip()
-#     value_part = right.strip()
-
-#     # check if its a math block
-#     if (value_part.startswith("$") and value_part.endswith("$")):
-#         inner = value_part[1:-1]
-#         # if there is no math block inside, return the string as is 
-#         if "$" not in inner: 
-#             return string
-#         else: # if there is a math block inside, flag it
-#             outer_math_wrapped = False  
-
-#     # searches two parts:
-#     # 1. a number (with optional sign, decimal point, and scientific notation)
-#     # 2. an optional unit in brackets (square or round) and/or in math mode "$...$"
-#     match = re.search(
-#         r"(?P<number>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?)\s*(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))?",
-#         value_part,
-#     )
-
-#     # If no match is found or if the number part is empty, return the original string
-#     if match is None or match.group("number") == "":
-#         return string
-
-#     if match.start() > 0 and value_part[match.start() - 1] == "$" and match.end() < len(value_part) and value_part[match.end()] == "$":
-#         # If the number is already wrapped in a single math block, return the original string without further processing, 
-#         # to avoid creating display style math blocks with double "$$...$$".
-#         return string
-#     if match.start() == 1 and value_part.startswith("$") and value_part.endswith("$") and "$" not in value_part[1:-1]:
-#         return string
-
-#     # Extract the matched number and unit, convert the number to a float
-#     number_str = match.group("number")
-#     unit_text = match.group("unit")
-#     number = float(number_str)
-
-#     # If no unit is found, wrap the number in a math block and return the updated string, keeping any trailing comma outside the math block.
-#     if unit_text is None:
-#         replacement = f"${number_str}$"
-#         updated_value_part = value_part[:match.start()] + replacement + value_part[match.end():]
-#         updated_value_part = updated_value_part.strip() # remove any leading/trailing whitespace from the updated value part
-
-#         if match.start() == 0 and value_part[match.end():].strip().startswith(","):
-#             # Keep a trailing comma outside the math block, e.g. 'z = $-3.5$, automatic'
-#             updated_value_part = replacement + value_part[match.end():].strip()
-#         return f"{left} = {updated_value_part}".strip()
-
-#     # If a unit is found, determine the appropriate SI prefix 
-#     siprefix, xsi_exponent, _ = get_SI_prefix((number, number), bm=bm)
-#     if siprefix is None or _contains_prefix_in_unit(unit_text, siprefix):
-#         # if no suitable SI prefix is found or if the unit already contains the prefix, return the original string
-#         return string
-
-#     # Scale the number according to the SI prefix exponent and insert the prefix into the unit text
-#     scaled_number = number * (10 ** (-xsi_exponent))
-#     scaled_str = f"{scaled_number:g}"
-#     replacement = f"{scaled_str}{_insert_prefix_into_unit(unit_text, siprefix)}"
-#     updated_value_part = value_part[:match.start()] + replacement + value_part[match.end():]
-#     updated_value_part = updated_value_part.strip()
-
-#     # If the original string was wrapped in a math block, wrap the updated string in a math block as well.
-#     if outer_math_wrapped:
-#         updated_value_part = f"${updated_value_part}$"
-
-#     # If the number is at the start of the value part and there is trailed by optional whitespace and a comma, 
-#     # create a math block and append the trailing comma and text outside the math block, e.g. 'z = $-3.5[μm]$, automatic' 
-#     elif match.start() == 0 and value_part[match.end():].strip().startswith(","):
-#         updated_value_part = f"${replacement}$" + value_part[match.end():].strip()
-
-#     return f"{left} = {updated_value_part}".strip()
-
-# ##############################################################################
-# ##############################################################################
-
-# def get_formula_unit(string: str) -> tuple[str, str]:
-#     """Extract the math symbol and any trailing unit from a label-like string."""
-#     value = string.strip()
-#     if not value:
-#         return "", ""
-
-#     unit = ""
-#     formula_search_part = value
-
-#     # Strip a final bracketed unit only when it belongs to the label tail, not to the math formula itself.
-#     unit_match = re.search(r"(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))\s*$", value)
-#     if unit_match:
-#         unit_text = unit_match.group("unit").strip()
-#         if unit_text.startswith("$") and unit_text.endswith("$") and "$" not in unit_text[1:-1]:
-#             unit = unit_text[1:-1].strip()
-#         else:
-#             unit = unit_text.strip("[]() ")
-#         formula_search_part = value[:unit_match.start()].strip()
-
-#     if not formula_search_part:
-#         return "", unit.strip()
-
-#     # Preserve translated math blocks exactly as written.
-#     math_block_match = re.search(r"\$[^$]+\$", formula_search_part)
-#     if math_block_match:
-#         return math_block_match.group(0).strip(), unit.strip()
-
-#     plain = formula_search_part.strip("[]() ").strip()
-#     return plain.strip(), unit.strip()
-
-
-# ##############################################################################
-
-# def clean_label_text(text: str) -> str:
-#     """Strip accidental outer math wrappers from pure text fragments while leaving numeric label values untouched."""
-#     # If the text is empty or None, return it as is
-#     value = (text or "").strip()
-#     if not value:
-#         return value
-
-#     # If the text is wrapped in a single math block and does not contain any other math blocks inside, strip the outer $...$.
-#     if value.startswith("$") and value.endswith("$") and "$" not in value[1:-1]:
-#         value = value[1:-1].strip()
-
-#     # If the text does not contain an '=', return it as is
-#     if "=" not in value:
-#         return value
-
-#     # If the text contains an '=', split it into left and right parts, and check if the right part is a numeric value. 
-#     # If it is, return the original text; otherwise, return the cleaned text with the '=' preserved.
-#     left, right = value.split("=", 1)
-#     left = left.strip()
-#     right = right.strip()
-#     if re.search(r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?", right):
-#         return value
-#     return f"{left} = {right}".strip()
-
-
-# def translate_and_prefix_label(label: str, translation_dict: dict[str, str] | None = None, bm: bool = False) -> str:
-#     """Translate the label and apply SI prefixing without disturbing LaTeX math blocks."""
-#     if '=' not in label:
-#         translated = label
-#         if translation_dict is not None and label in translation_dict:
-#             translated = translation_dict[label]
-#         return clean_label_text(translated).strip()
-
-#     left, right = label.split('=', 1)
-#     variable = left.strip()
-#     rest = right.strip()
-
-#     if translation_dict is not None and variable in translation_dict:
-#         variable = translation_dict[variable]
-
-#     explicit_math_label = bool(re.search(r"\$.*?\$", variable or ""))
-
-#     if explicit_math_label:
-#         unit_match = re.search(r"(?P<unit>\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))\s*$", variable.strip())
-#         if unit_match:
-#             unit_text = unit_match.group("unit").strip()
-#             if unit_text.startswith("$") and unit_text.endswith("$") and "$" not in unit_text[1:-1]:
-#                 unit_text = unit_text[1:-1].strip()
-#             variable = variable[:unit_match.start()].rstrip()
-#             if rest and not re.search(r"\[[^\]]*\]|\([^)]*\)", rest):
-#                 rest = f"{rest}{unit_text}".strip()
-#         result = f"{variable.strip()} = {rest}".strip()
-#     else:
-#         short, unit = get_formula_unit(variable)
-#         if not short:
-#             short = variable.strip()
-
-#         if unit and not re.search(r"\[[^\]]*\]|\([^)]*\)", rest):
-#             rest = f"{rest} [{unit}]".strip()
-
-#         result = f"{short} = {rest}".strip()
-
-#     result = set_prefix_in_number_unit_string(result, bm=bm).strip()
-
-#     def _is_numeric_value_only(text: str) -> bool:
-#         """Return True only for a true numeric value expression, not for mixed text like '..., automatic'."""
-#         value = text.strip()
-#         if not value:
-#             return False
-#         if value.startswith("$") and value.endswith("$"):
-#             value = value[1:-1].strip()
-#         unit_pattern = r"(?:\$\[[^\]]*\]\$|\[[^\]]*\]|\$\([^)]*\)\$|\([^)]*\))?"
-#         numeric_pattern = r"[-+]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][-+]?\d+)?"
-#         return bool(re.fullmatch(rf"{numeric_pattern}\s*{unit_pattern}", value))
-
-#     if '=' in result:
-#         left_expr, right_expr = result.split('=', 1)
-#         left_expr = left_expr.strip()
-#         right_expr = right_expr.strip()
-
-#         # Only wrap if the whole right-hand side is a single numeric value block.
-#         # Mixed text like 'z = -3.5[μm], automatic' must remain plain text.
-#         # Do not add another $...$ layer when the value is already a single math block.
-#         if right_expr and _is_numeric_value_only(right_expr):
-#             if not (right_expr.startswith("$") and right_expr.endswith("$") and "$" not in right_expr[1:-1]):
-#                 right_stripped = right_expr
-#                 if right_stripped.startswith("$") and right_stripped.endswith("$"):
-#                     right_stripped = right_stripped[1:-1].strip()
-#                 if not right_stripped.startswith("$") and not right_stripped.endswith("$"):
-#                     result = f"{left_expr} = ${right_stripped}$".strip()
-
-#     return result
-
-
-
-
-
-
-
-
-
-
-
-# =============================================================================
-# Regex building blocks (compiled once, reused at every call site)
-# =============================================================================
 
 # A bracketed unit block: [ ... ] or ( ... ), optionally wrapped in a single
 # math block ($...$).
@@ -868,7 +465,7 @@ def prefixes_notation(fig: matplotlib.figure.Figure, ax: matplotlib.axes.Axes, a
 
 ##############################################################################
 ##############################################################################
-# plotting helper
+# plot position helper
 ##############################################################################
 ##############################################################################
 
@@ -893,7 +490,6 @@ def calc_figure_size(fraction: float = 1.0, width_pt: float = TEXTWIDTH, subplot
 
     return fig_width_in, fig_height_in
 
-##############################################################################
 ##############################################################################
 
 def get_fig_ax(fraction_textwidth: float = 1.0, subplots: tuple = (1, 1)) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
@@ -1032,7 +628,7 @@ def dynamic_legend(
     fig: matplotlib.figure.Figure,
     ax: matplotlib.axes.Axes,
     fraction: float = 1.0,
-    width_tolerance: float = 1.30, # = 130% of the figure width
+    width_tolerance: float = 1.00,
     max_columns: int = 3,
     use_parity: bool = False,
 ):
@@ -1132,25 +728,143 @@ def dynamic_legend(
 ##############################################################################
 ##############################################################################
 
-def save_figure(fig: matplotlib.figure.Figure, path: Path | str):
+def finalize_layout(
+        fig: matplotlib.figure.Figure,
+        ax: matplotlib.axes.Axes,
+        left_in: float = LEFT_LABEL_SPACE,
+        right_in: float = RIGHT_LABEL_SPACE,
+    ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
     """
-    Saves the given figure to a PDF file in the specified output folder.
-    
-    Args:
-        fig (matplotlib.figure.Figure): The matplotlib figure object to save.
-        path (Path | str): The path where the figure will be saved.
-        fraction (float): The fraction of the page width to use for the figure.
-        subplots (tuple): The number of rows and columns of subplots.
-    """
-    fig.savefig(
-        str(path)+".pdf",
-        bbox_inches='tight',
-        dpi=300, # set the resolution for "rasterized" elements (i.e. scatter-points) in the figure
-        backend='pdf',
-        )
-    plt.show()
-    # plt.close(fig)  # Close the figure after saving to free up memory
+    Finalizes the layout of the figure and axes. This function calculates the appropriate figure height based on the golden ratio 
+    and adjusts the axes position accordingly. It also takes into account any extra artists (like legends) that may affect the tight bounding box of the figure.
 
+    Args:
+        fig (matplotlib.figure.Figure): The matplotlib figure object.
+        ax (matplotlib.axes.Axes): The matplotlib axes object.
+        left_in (float): The left margin in inches.
+        right_in (float): The right margin in inches.
+
+    Returns:
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]: The updated figure and axes objects.
+    """
+    golden_ratio = (5 ** 0.5 - 1) / 2
+    fig_width_in, _ = fig.get_size_inches()
+
+    axes_width_in = fig_width_in - left_in - right_in
+    axes_height_in = axes_width_in * golden_ratio
+
+    fig.canvas.draw()
+    renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+
+    extra_artists = []
+    legend = ax.get_legend()
+    if legend is not None:
+        extra_artists.append(legend)
+
+    tight_bbox = fig.get_tightbbox(renderer, bbox_extra_artists=extra_artists)
+    ax_bbox = ax.get_window_extent(renderer)
+
+    top_in = max(0.0, (tight_bbox.y1 - ax_bbox.y1) / fig.dpi)
+    bottom_in = max(0.0, (ax_bbox.y0 - tight_bbox.y0) / fig.dpi)
+
+    new_fig_height_in = axes_height_in + top_in + bottom_in
+    assert new_fig_height_in > 0, (
+        f"invalid figure height: axes_height_in={axes_height_in}, "
+        f"top_in={top_in}, bottom_in={bottom_in}"
+    )
+    fig.set_size_inches(fig_width_in, new_fig_height_in, forward=True)
+
+    left = left_in / fig_width_in
+    width = axes_width_in / fig_width_in
+    bottom = bottom_in / new_fig_height_in
+    height = axes_height_in / new_fig_height_in
+
+    ax.set_position([left, bottom, width, height])
+    fig.canvas.draw()
+    return fig, ax
+
+def position_ylabel_left(fig, ax, x_in: float = (LEFT_LABEL_SPACE - 0.5)):
+    """
+    Positions the y-axis label at a fixed horizontal position (in inches from the left edge of the figure). 
+    The tick numbers remain unchanged directly on the axis. This function must be called after finalize_layout, as it requires the final axis position.
+    """
+    fig_width_in, _ = fig.get_size_inches()
+    ax_pos = ax.get_position()  
+
+    x_fig = x_in / fig_width_in
+    x_axes = (x_fig - ax_pos.x0) / ax_pos.width 
+
+    ax.yaxis.set_label_coords(x_axes, 0.5)
+    return fig, ax
+
+def position_legend(fig, ax, gap_in: float = 0.05):
+    """
+    Positions the legend under the x-axis label with a fixed gap (in inch).
+    Needs to be called AFTER finalize_layout.
+    """
+    legend = ax.get_legend()
+    if legend is None:
+        return fig, ax
+
+    fig.canvas.draw()
+    renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+
+    xlabel_bbox = ax.xaxis.label.get_window_extent(renderer)
+    bottom_of_xlabel_in = xlabel_bbox.y0 / fig.dpi
+
+    fig_height_in = fig.get_size_inches()[1]
+    anchor_y_fig = (bottom_of_xlabel_in - gap_in) / fig_height_in
+
+    legend.set_bbox_to_anchor((0.5, anchor_y_fig), transform=cast(mtransforms.Transform, fig.transFigure))
+    fig.canvas.draw()
+    return fig, ax
+
+def save_figure(
+        fig: matplotlib.figure.Figure,
+        ax: matplotlib.axes.Axes,
+        path: Path | str,
+        pad_inches: float = 0.025,
+        ):
+    """
+    Saves the given figure to a PDF file in the specified output folder with a fixed width and a height.
+
+    sugested workflow:
+    fig, ax = apf.plot_background(fig, ax, ...)
+    fig, ax = apf.dynamic_legend(fig, ax)
+    fig, ax = apf.finalize_layout(fig, ax)
+    fig, ax = apf.position_ylabel_left(fig, ax)
+    fig, ax = apf.position_legend(fig, ax)
+    apf.save_figure(fig, ax, path)
+    """
+
+    fig.canvas.draw() 
+    renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
+
+    # old figurewidth
+    fig_width_in, _ = fig.get_size_inches()
+
+    # get the tight bounding box of the figure including all artists (like legends, labels, etc.)
+    tight_bbox = fig.get_tightbbox(renderer)
+
+    # x: set [0, fig_width_in] -> ficed with
+    # y: bbox thicht "tight" -> variable height
+    x0, x1 = 0.0, fig_width_in
+    y0 = tight_bbox.y0 - pad_inches
+    y1 = tight_bbox.y1 + pad_inches
+
+    bbox = Bbox.from_extents(x0, y0, x1, y1)
+
+    fig.savefig(
+        str(path) + ".pdf",
+        bbox_inches=bbox,
+        dpi=300,
+        backend='pdf',
+    )
+    plt.show(fig)
+
+##############################################################################
+##############################################################################
+# Plotting helper
 ##############################################################################
 ##############################################################################
 

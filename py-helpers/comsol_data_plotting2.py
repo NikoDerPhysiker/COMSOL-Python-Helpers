@@ -259,7 +259,7 @@ def add_temperature_theory_01_00(
             
         # plot
         theory_name = "line source approx."
-        if not xparam == "z":
+        if not xparam == "z" and mark_z:
             z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
             z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
             label = z_value_str + ", " + theory_name
@@ -1207,19 +1207,20 @@ def zaxis_plot(
         if "T (K)" in yparam and temperature_theory is not None:
             fig, ax = temperature_theory(fig, ax, df_parameters, xparam=xparam)
 
-        fig, ax = apf.plot_background(fig, ax)
-        
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-        
-        # remove any text in parentheses and leading/trailing whitespace
-        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
-        # create output folder 
         plot_output_folder = output_folder / modelfolder / "z axis"
         makedirs(plot_output_folder, exist_ok=True)
+
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
-        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{iterations_str}")
+        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
+
+        fig, ax = apf.plot_background(fig, ax)
+        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
+        fig, ax = apf.finalize_layout(fig, ax)
+        fig, ax = apf.position_ylabel_left(fig, ax)
+        fig, ax = apf.position_legend(fig, ax)
+        apf.save_figure(fig, ax, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{iterations_str}")
 
 ##############################################################################
 
@@ -1426,19 +1427,20 @@ def yaxis_plot(
                     colorB = Bcolors[zidx % len(Bcolors)]
                     fig, ax = temperature_theory(fig, ax, df_parameters, xparam=xparam, z_pos = z_value, colorA = colorA, colorB = colorB)
 
-        fig, ax = apf.plot_background(fig, ax)
-            
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
         
-        # remove any text in parentheses and leading/trailing whitespace
-        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
-
-        # create output folder 
         plot_output_folder = output_folder / modelfolder / "y axis"
         makedirs(plot_output_folder, exist_ok=True)
+
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
-        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}")
+        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
+
+        fig, ax = apf.plot_background(fig, ax)
+        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
+        fig, ax = apf.finalize_layout(fig, ax)
+        fig, ax = apf.position_ylabel_left(fig, ax)
+        fig, ax = apf.position_legend(fig, ax)
+        apf.save_figure(fig, ax, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}")
 
 ##############################################################################
 
@@ -1635,19 +1637,20 @@ def xaxis_plot(
                     colorB = Acolors[zidx % len(Acolors)]
                     fig, ax = temperature_theory(fig, ax, df_parameters, xparam=xparam, z_pos = z_value, colorA = colorA, colorB = colorB)
 
-        fig, ax = apf.plot_background(fig, ax)
-            
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-
-        # remove any text in parentheses and leading/trailing whitespace
-        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
-
-        # create output folder 
         plot_output_folder = output_folder / modelfolder / "x axis"
         makedirs(plot_output_folder, exist_ok=True)
+
+
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
+        clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
-        apf.save_figure(fig, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}")
+
+        fig, ax = apf.plot_background(fig, ax)
+        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
+        fig, ax = apf.finalize_layout(fig, ax)
+        fig, ax = apf.position_ylabel_left(fig, ax)
+        fig, ax = apf.position_legend(fig, ax)
+        apf.save_figure(fig, ax, path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}")
 
 
 ##############################################################################
@@ -1820,18 +1823,21 @@ def xyplane_plot(
                             markersize = 0.01*apf.MARKERSIZE,
                         )
             
-                # remove any text in parentheses and leading/trailing whitespace
-                clean_zparam = re.sub(r"\s*\(.*?\)", "", str(zparam)) 
+                plot_output_folder = output_folder / modelfolder / "xy plane"
+                makedirs(plot_output_folder, exist_ok=True)  
 
                 model_label = modelnames[midx].split("-")[1] if "-" in modelnames[midx] else modelnames[midx]
                 model_label = translation_dict[model_label] if translation_dict and model_label in translation_dict else model_label
-
-                # create output folder 
-                plot_output_folder = output_folder / modelfolder / "xy plane"
-                makedirs(plot_output_folder, exist_ok=True)  
+                clean_zparam = re.sub(r"\s*\(.*?\)", "", str(zparam)) 
                 z_value = meaned_values_float.get("z", None)
                 iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
-                apf.save_figure(fig, path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{iterations_str}")
+
+
+                fig, ax = apf.dynamic_legend(fig, ax)
+                fig, ax = apf.finalize_layout(fig, ax)
+                fig, ax = apf.position_ylabel_left(fig, ax)
+                fig, ax = apf.position_legend(fig, ax)
+                apf.save_figure(fig, ax, path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{iterations_str}")
 
 ##############################################################################
 
@@ -2032,16 +2038,17 @@ def angle_error_plot(
     if plot_total_mean:
         df_mean_grouped = df_mean.groupby(xparam).mean().reset_index()
         ax.plot(df_mean_grouped[xparam], df_mean_grouped[yparam], label="mean", color="tab:blue")
-
-
-    fig, ax = apf.plot_background(fig, ax)
-    if label is not None:
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
     
     # create output folder 
     plot_output_folder = output_folder / modelfolder / "angle error"
     makedirs(plot_output_folder, exist_ok=True)  
-    apf.save_figure(fig, path = plot_output_folder / f"{modelnames[0]}-Angle Error-{"__".join(map(str, plot_z))}")
+
+    fig, ax = apf.plot_background(fig, ax)
+    fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
+    fig, ax = apf.finalize_layout(fig, ax)
+    # fig, ax = apf.position_ylabel_left(fig, ax)
+    fig, ax = apf.position_legend(fig, ax)
+    apf.save_figure(fig, ax, path = plot_output_folder / f"{modelnames[0]}-Angle Error-{"__".join(map(str, plot_z))}")
 
     return df_statistics
 
