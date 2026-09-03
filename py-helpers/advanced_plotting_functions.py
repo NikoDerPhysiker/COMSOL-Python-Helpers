@@ -634,16 +634,24 @@ def set_wrapped_title(
     fig: matplotlib.figure.Figure,
     ax: matplotlib.axes.Axes,
     title: str | None = None,
-    gap_to_plot_in: float = 0.2,       # Abstand vom Plot-Rand bis zur Unterkante des Subtitels
-    gap_in: float = 0.15,               # Abstand von Oberkante Subtitel bis Unterkante Haupttitel
-    linespacing: float | None = None,
+    gap_to_plot_in: float = 0.2,  
+    gap_in: float = 0.15,
     width_tolerance: float = 1.0,
 ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list[matplotlib.text.Text]]:
     """
-    Positioniert den Titel dynamisch von unten nach oben über dem Plot-Fenster.
-    
-    Unterkante Subtitel = Oberkante Plot + gap_to_plot_in
-    Unterkante Haupttitel = Oberkante Subtitel + gap_in
+    This function sets a wrapped title for a matplotlib figure, 
+    ensuring that the title and subtitle fit within the specified width tolerance. 
+    It calculates the appropriate positions for the main title and subtitle based on the provided gaps.
+
+    Args:
+        fig (matplotlib.figure.Figure): The matplotlib figure object.
+        ax (matplotlib.axes.Axes): The matplotlib axes object.
+        title (str | None): The title string, which may contain a main title and a subtitle in parentheses. Default is None.
+        gap_to_plot_in (float): The gap in inches between the bottom of the subtitle and the top of the plot. Default is 0.2 inches.
+        gap_in (float): The gap in inches between the bottom of the main title and the top of the subtitle. Default is 0.15 inches.
+        width_tolerance (float): The maximum width fraction of the figure that the title can occupy. Default is 1.0 (full width).
+    Returns:
+        tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list[matplotlib.text.Text]]: A tuple containing the figure, axes, and a list of the text objects created for the title.
     """
     if title is None:
         title = ax.get_title()
@@ -665,7 +673,7 @@ def set_wrapped_title(
     fig.canvas.draw()
     renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
 
-    # --- Hilfsfunktion für Textbreitenmessung ---
+    # helper function to measure the width of a text string in inches
     def render_width_in(text: str, fontsize: float) -> float:
         t = fig.text(0, 0, rf"{{{text}}}", alpha=0.0, fontsize=fontsize)
         fig.canvas.draw()
@@ -673,7 +681,7 @@ def set_wrapped_title(
         t.remove()
         return bbox.width / fig.dpi
 
-    # --- Text-Splitting und Wrapping ---
+    # Split the title into main title and subtitle based on parentheses
     if "(" not in title:
         main_title = title
         subtitle_content = ""
@@ -681,7 +689,7 @@ def set_wrapped_title(
         main_title = title.split("(", 1)[0].strip()
         subtitle_content = title.split("(", 1)[1].rsplit(")", 1)[0].strip()
 
-    # Wrapping-Logik für Subtitle
+    # the subtitle content may contain multiple segments separated by commas, which we want to wrap intelligently
     wrapped_content = subtitle_content
     if subtitle_content:
         segments = [s.strip() for s in subtitle_content.split(",")]
@@ -707,20 +715,19 @@ def set_wrapped_title(
                 joined_lines[j] += ","
             wrapped_content = "\n".join(joined_lines)
 
-    # --- Absolute Positionierung von unten nach oben ---
-    
-    # 1. Bestimme die Oberkante des Plot-Fensters (ax) in Inches
+       
+    # get the top of the plot in inches
     ax_bbox = ax.get_window_extent(renderer)
     plot_top_in = ax_bbox.y1 / fig.dpi
 
     artists = []
 
     if wrapped_content:
-        # 2. Berechne exakte Y-Position für die Unterkante des Subtitels
+        # get the bottom of the subtitle in inches
         sub_bottom_in = plot_top_in + gap_to_plot_in
         sub_y_fig = sub_bottom_in / fig_height_in
 
-        # Zeichne Subtitel (va='bottom' verankert die Unterkante)
+        # add the subtitle text artist to the figure, anchored at the bottom
         sub_artist = fig.text(
             0.5, sub_y_fig, wrapped_content,
             ha='center', va='bottom',
@@ -729,21 +736,19 @@ def set_wrapped_title(
         )
         artists.append(sub_artist)
         
-        # Bestimme die tatsächliche Oberkante des gezeichneten Subtitels
+        # get the top of the subtitle in inches
         fig.canvas.draw()
         sub_bbox = sub_artist.get_window_extent(renderer)
         sub_top_in = sub_bbox.y1 / fig.dpi
         
-        # Basis für den Haupttitel ist die Oberkante des Subtitels
+        # get the bottom of the main title in inches, which is the top of the subtitle plus the gaps
         main_bottom_in = sub_top_in + gap_in
     else:
-        # Wenn kein Subtitel existiert, nutzt der Haupttitel den direkten Plot-Abstand
+        # if there is no subtitle, the bottom of the main title is just the top of the plot plus the gap
         main_bottom_in = plot_top_in + gap_to_plot_in
 
-    # 3. Berechne Y-Position für die Unterkante des Haupttitels
+    # get the y coordinate of the main title in figure coordinates and add the main title text artist to the figure, anchored at the bottom
     main_y_fig = main_bottom_in / fig_height_in
-
-    # Zeichne Haupttitel (va='bottom' verankert die Unterkante)
     main_artist = fig.suptitle(
         rf"\textbf{{{main_title}}}", 
         y=main_y_fig, 
@@ -753,7 +758,7 @@ def set_wrapped_title(
     )
     artists.insert(0, main_artist)
 
-    # Finaler Render-Call, damit die neuen Positionen aktiv sind
+    # draw the canvas to ensure the title and subtitle are rendered correctly
     fig.canvas.draw()
 
     return fig, ax, artists
