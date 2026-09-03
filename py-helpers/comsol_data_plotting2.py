@@ -1215,16 +1215,10 @@ def zaxis_plot(
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
-        fig, ax = apf.plot_background(fig, ax)
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-        fig, ax, title_artists = apf.set_wrapped_title(fig, ax)
-        fig, ax = apf.finalize_layout(fig, ax, title_artists=title_artists)
-        fig, ax = apf.position_ylabel_left(fig, ax)
-        fig, ax = apf.position_legend(fig, ax)
-        apf.save_figure(fig, ax,
-                        title_artists = title_artists,
-                        path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{iterations_str}",
-                        )
+        apf.finalize_layout_and_save_figure(
+            fig, ax, fraction=fraction,
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{iterations_str}",
+            )
 
 ##############################################################################
 
@@ -1439,15 +1433,10 @@ def yaxis_plot(
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
-        fig, ax = apf.plot_background(fig, ax)
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-        fig, ax, title_artists = apf.set_wrapped_title(fig, ax)
-        fig, ax = apf.finalize_layout(fig, ax, title_artists=title_artists)
-        fig, ax = apf.position_ylabel_left(fig, ax)
-        fig, ax = apf.position_legend(fig, ax)
-        apf.save_figure(fig, ax,
-                        title_artists = title_artists,
-                        path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}")
+        apf.finalize_layout_and_save_figure(
+            fig, ax, fraction=fraction,
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}",
+            )
 
 ##############################################################################
 
@@ -1652,16 +1641,10 @@ def xaxis_plot(
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
 
-        fig, ax = apf.plot_background(fig, ax)
-        fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-        fig, ax, title_artists = apf.set_wrapped_title(fig, ax)
-        fig, ax = apf.finalize_layout(fig, ax, title_artists=title_artists)
-        fig, ax = apf.position_ylabel_left(fig, ax)
-        fig, ax = apf.position_legend(fig, ax)
-        apf.save_figure(fig, ax,
-                        title_artists = title_artists,
-                        path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}",
-                        )
+        apf.finalize_layout_and_save_figure(
+            fig, ax, fraction=fraction,
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}",
+            )
 
 
 ##############################################################################
@@ -1844,16 +1827,11 @@ def xyplane_plot(
                 iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
 
 
-                fig, ax = apf.plot_background(fig, ax)
-                fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-                fig, ax, title_artists = apf.set_wrapped_title(fig, ax)
-                fig, ax = apf.finalize_layout(fig, ax, title_artists=title_artists)
-                # fig, ax = apf.position_ylabel_left(fig, ax)
-                fig, ax = apf.position_legend(fig, ax)
-                apf.save_figure(fig, ax,
-                                title_artists = title_artists,
-                                path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{iterations_str}",
-                                )
+                apf.finalize_layout_and_save_figure(
+                    fig, ax, fraction=fraction, aspect_ratio=1.0,
+                    skip_ylabel_positioning=True,
+                    path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{iterations_str}",
+                    )
 
 ##############################################################################
 
@@ -2059,16 +2037,11 @@ def angle_error_plot(
     plot_output_folder = output_folder / modelfolder / "angle error"
     makedirs(plot_output_folder, exist_ok=True)  
 
-    fig, ax = apf.plot_background(fig, ax)
-    fig, ax = apf.dynamic_legend(fig, ax, fraction=fraction)
-    fig, ax, title_artists = apf.set_wrapped_title(fig, ax)
-    fig, ax = apf.finalize_layout(fig, ax, title_artists=title_artists)
-    # fig, ax = apf.position_ylabel_left(fig, ax)
-    fig, ax = apf.position_legend(fig, ax)
-    apf.save_figure(fig, ax,
-                    title_artists = title_artists,
-                     path = plot_output_folder / f"{modelnames[0]}-Angle Error-{"__".join(map(str, plot_z))}",
-                    )
+    apf.finalize_layout_and_save_figure(
+        fig, ax, fraction=fraction,
+        skip_ylabel_positioning=True,
+        path = plot_output_folder / f"{modelnames[0]}-Angle Error-{"__".join(map(str, plot_z))}",
+        )
 
     return df_statistics
 
