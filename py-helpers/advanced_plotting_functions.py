@@ -33,7 +33,9 @@ from matplotlib.transforms import Bbox
 import matplotlib.transforms as mtransforms
 
 # for type hinting
-from typing import Literal, cast
+from pathlib import Path
+
+from typing import Literal, cast, Any
 
 import matplotlib.axes
 import matplotlib.figure
@@ -41,7 +43,6 @@ import matplotlib.text
 from matplotlib.markers import MarkerStyle
 from matplotlib.backends.backend_agg import FigureCanvasAgg
 
-from pathlib import Path
 
 ##############################################################################
 ##############################################################################
@@ -628,150 +629,6 @@ def plot_background(
 
 ##############################################################################
 ##############################################################################
-
-# def set_wrapped_title(
-#         fig: matplotlib.figure.Figure,
-#         ax: matplotlib.axes.Axes,
-#         title: str | None = None,
-#         y: float = 1.0,               # y-position of the main title (in figure coordinates)
-#         gap_in: float = 0.2,          # gap between main title and subtitle
-#         linespacing: float | None = None,  # gap between lines in the subtitle (None = auto)
-#         width_tolerance: float = 1.0,
-#     ) -> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes, list[matplotlib.text.Text]]:
-#     """
-#     Sets the title as TWO separate text artists:
-#       1. Main title (before "("), bold, in axes.titlesize, on top.
-#       2. Subtitle (bracket content without the brackets), regular FONTSIZE,
-#          below it -- wrapped at commas if needed.
-
-#     Returns a list of both created text artists (empty if no title was set),
-#     so that finalize_layout/save_figure can correctly include their height.
-
-#     If linespacing is None, it is chosen automatically: a compact value for
-#     a single-line subtitle, and a larger, textsize-dependent value once the
-#     subtitle wraps onto multiple lines (larger fonts need proportionally
-#     more line spacing to stay readable).
-#     """
-#     if title is None:
-#         title = ax.get_title()
-#         ax.set_title("")
-
-#     if not title:
-#         return fig, ax, []
-
-#     titlecolor = plt.rcParams.get("axes.titlecolor", MAINCOLOR)
-#     titlesize = plt.rcParams.get("axes.titlesize", FONTSIZE)
-#     textsize = plt.rcParams.get("font.size", FONTSIZE)
-
-#     if isinstance(titlesize, str):
-#         titlesize = FONTSIZE
-
-#     if isinstance(textsize, str):
-#         textsize = FONTSIZE
-
-#     if "(" not in title:
-#         main_artist = fig.suptitle(rf"\textbf{{{title}}}", y=y)
-#         return fig, ax, [main_artist]
-
-#     main_title = title.split("(", 1)[0].strip()
-#     subtitle_content = title.split("(", 1)[1].rsplit(")", 1)[0].strip()
-
-#     fig_width_in = fig.get_size_inches()[0]
-#     max_width_in = fig_width_in * width_tolerance
-
-#     fig.canvas.draw()
-#     renderer = cast(FigureCanvasAgg, fig.canvas).get_renderer()
-
-#     def render_width_in(text: str, fontsize: float) -> float:
-#         # invisible text artist used only to measure the rendered width
-#         t = fig.text(0, 0, rf"{{{text}}}", alpha=0.0, fontsize=fontsize)
-#         fig.canvas.draw()
-#         bbox = t.get_window_extent(renderer)
-#         t.remove()
-#         return bbox.width / fig.dpi
-
-#     segments = [s.strip() for s in subtitle_content.split(",")]
-
-#     if len(segments) <= 1 or render_width_in(subtitle_content, textsize) <= max_width_in:
-#         wrapped_content = subtitle_content
-#     else:
-#         # Special rule: if the first segment contains no "$" (i.e. plain
-#         # text such as "Round coil and grid" instead of a formula), check
-#         # whether isolating it on its own line is actually needed -- only
-#         # do so if the remaining segments would not fit on one line anyway.
-#         isolate_first = False
-#         if "$" not in segments[0] and len(segments) > 1:
-#             rest_text = ", ".join(segments[1:])
-#             if render_width_in(rest_text, textsize) > max_width_in:
-#                 isolate_first = render_width_in(segments[0] + ",", textsize) <= max_width_in
-
-#         lines: list[list[str]] = [[segments[0]]] if isolate_first else [[]]
-#         remaining = segments[1:] if isolate_first else segments
-
-#         # Greedy packing: fit as many segments as possible per line
-#         for seg in remaining:
-#             candidate_line = lines[-1] + [seg]
-#             candidate_text = ", ".join(candidate_line)
-
-#             if lines[-1] and render_width_in(candidate_text, textsize) > max_width_in:
-#                 lines.append([seg])
-#             else:
-#                 lines[-1] = candidate_line
-
-#         joined_lines = [", ".join(line) for line in lines]
-#         for j in range(len(joined_lines) - 1):
-#             joined_lines[j] += ","
-#         wrapped_content = "\n".join(joined_lines)
-
-#     # 1. Set the main title (bold, titlesize) and measure its position
-#     main_artist = fig.suptitle(rf"\textbf{{{main_title}}}", y=y, fontsize=titlesize, color=titlecolor)
-#     fig.canvas.draw()
-#     main_bbox = main_artist.get_window_extent(renderer)
-#     main_bottom_in = main_bbox.y0 / fig.dpi
-
-#     # 2. Compute subtitle y-position: gap_in below the main title
-#     fig_height_in = fig.get_size_inches()[1]
-#     sub_y_fig = (main_bottom_in - gap_in) / fig_height_in
-
-#     # 3. Auto-determine linespacing if not explicitly provided:
-#     #    a single-line subtitle can stay compact, but a wrapped
-#     #    (multi-line) subtitle needs more room, scaled by textsize so
-#     #    larger fonts get proportionally more spacing.
-#     # min_linespacing = 3e-4
-#     min_linespacing = 0.03
-#     print(f"min_linespacing: {min_linespacing}")
-#     if linespacing is None:
-#         n_lines = wrapped_content.count("\n") + 1
-#         if n_lines > 1:
-#             linespacing = min_linespacing + 0.03 * textsize
-#         else:
-#             linespacing = min_linespacing
-
-#     # For a multi-line subtitle: verticalalignment='top' ensures sub_y_fig
-#     # marks the TOP edge of the subtitle block
-
-#     sub_artist = fig.text(
-#         0.5, sub_y_fig+linespacing, wrapped_content,
-#         ha='center', va='top',
-#         fontsize=textsize,
-#         # linespacing=linespacing,
-#         color=titlecolor,
-#     )
-
-#     fig.canvas.draw()
-
-#     return fig, ax, [main_artist, sub_artist]
-
-import matplotlib.pyplot as plt
-import matplotlib.figure
-import matplotlib.axes
-import matplotlib.text
-from matplotlib.backends.backend_agg import FigureCanvasAgg
-from typing import cast, Any
-
-# Konstanten (falls nicht global definiert)
-MAINCOLOR = "black"
-FONTSIZE = 10
 
 def set_wrapped_title(
     fig: matplotlib.figure.Figure,
