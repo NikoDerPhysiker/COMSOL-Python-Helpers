@@ -29,6 +29,9 @@ _ = importlib.reload(tfm)
 import comsol_data_import as cdi
 _ = importlib.reload(cdi)
 
+import voltage_grid as vg
+_ = importlib.reload(vg)
+
 # for type hints
 from typing import Callable
 import matplotlib.figure
@@ -555,8 +558,27 @@ def add_magnetic_theory_02_00(
 ##############################################################################
 ##############################################################################
 
+TARGET_STRS = [
+    r"high res (try 2)\RESULTS\01_xx-Coils and Grid Designs\01_03_a-Round spiral combined with grid\Data Export\01_03_a-Round spiral combined with grid",
+    r"high res (try 2)\RESULTS\01_xx-Coils and Grid Designs\01_03_b-Rectangular spiral combined with grid\Data Export\01_03_b-Rectangular spiral combined with grid"
+    ]
+REPLACEMENT_STR = [
+    r"high res (try 3)\RESULTS\01_xx-Coils and Grid Designs\01_03_a-Round spiral combined with grid\Sweep - Voltage angles\Sweep Export\01_03_a-Round spiral combined with grid-iteration_1",
+    r"high res (try 3)\RESULTS\01_xx-Coils and Grid Designs\01_03_b-Rectangular spiral combined with grid\Sweep - Voltage angles\Sweep Export\01_03_b-Rectangular spiral combined with grid-iteration_1"
+    ]
+
+
 def import_csv_to_df(input_folder: Path, modelfolder: str, modelname: str, ending: str, data_export: str = "Data Export"):
     path = input_folder / modelfolder / modelname / data_export / f"{modelname}{ending}"
+
+    # quick path fix 
+    str_path = str(path)
+    if any(target in str_path for target in TARGET_STRS):
+        for target, replacement in zip(TARGET_STRS, REPLACEMENT_STR):
+            str_path = str_path.replace(target, replacement)
+        path = Path(str_path)
+
+
     df = pd.read_csv(path)
 
     if ending == "-parameters.csv":
@@ -566,6 +588,15 @@ def import_csv_to_df(input_folder: Path, modelfolder: str, modelname: str, endin
 
 def import_COMSOLTXT_to_df(input_folder: Path, modelfolder: str, modelname: str, ending: str, data_export: str = "Data Export", T_0: float = T_0):
     path = input_folder / modelfolder / modelname / data_export / f"{modelname}{ending}"
+
+    # quick path fix 
+    str_path = str(path)
+    if any(target in str_path for target in TARGET_STRS):
+        for target, replacement in zip(TARGET_STRS, REPLACEMENT_STR):
+            str_path = str_path.replace(target, replacement)
+        path = Path(str_path)
+
+
     header, df = cdi.read_comsol_export(str(path))
 
     # use relative temperatures
@@ -613,16 +644,10 @@ def import_COMSOLTXT_to_df_sweep(iteration: int, input_folder: Path, modelfolder
 ##############################################################################
 ##############################################################################
 
-def display_params(params: list[str], df_parameters: pd.DataFrame, translation_dict: dict[str, str], df_terminals: pd.DataFrame | None = None) -> str:
+def display_params(params: list[str], df_parameters: pd.DataFrame, translation_dict: dict[str, str], df_terminals: pd.DataFrame | None = None, z_target: float = vg.Z_TARGET) -> str:
     label = ""
     for param in params:
-        if param != "V_Grid":
-            mask = df_parameters["name"] == param
-            if not mask.any():
-                raise ValueError(f"Parameter '{param}' not found in df_parameters.")
-            value = df_parameters.loc[mask, "evaluated_value"].iloc[0]
-            name = df_parameters.loc[mask, "name"].iloc[0]
-        else:
+        if param == "V_Grid":
             if df_terminals is None:
                 raise ValueError("df_terminals must be provided when displaying 'V_Grid'.")
             
@@ -634,6 +659,41 @@ def display_params(params: list[str], df_parameters: pd.DataFrame, translation_d
 
             value = abs(min_voltage) + abs(max_voltage)
             name = "V_Grid"
+        if param == "B_set":
+            if df_terminals is None:
+                raise ValueError("df_terminals must be provided when displaying 'B_set'.")
+
+            mask = df_parameters["name"] == "conductor_grid_length"
+            conductor_grid_length = df_parameters.loc[mask, "evaluated_value"].iloc[0]
+
+            mask = df_parameters["name"] == "conductor_grid_width"
+            conductor_grid_width = df_parameters.loc[mask, "evaluated_value"].iloc[0]
+
+            mask = df_parameters["name"] == "conductor_grid_height"
+            conductor_grid_height = df_parameters.loc[mask, "evaluated_value"].iloc[0]
+
+
+            B_set: tuple[float, float, float] = vg.calculate_b_field_from_df(
+                df = df_terminals, 
+                z_target = z_target, 
+                conductor_grid_length = conductor_grid_length, 
+                conductor_grid_width = conductor_grid_width, 
+                conductor_grid_height = conductor_grid_height, 
+                conductivity = vg.CONDUCTIVITY
+                )
+            value = np.linalg.norm(B_set)
+            value = round(value, 7)  # Round to 6 decimal places for display
+
+            target_str = f"{z_target*1e6}"
+            name = r"$|B_{\mathrm{set},"+ target_str + r"\,\mathrm{\upmu m}}|$ $[\mathrm{T}]$"
+
+
+        else:
+            mask = df_parameters["name"] == param
+            if not mask.any():
+                raise ValueError(f"Parameter '{param}' not found in df_parameters.")
+            value = df_parameters.loc[mask, "evaluated_value"].iloc[0]
+            name = df_parameters.loc[mask, "name"].iloc[0]
 
         value_str = name + r" = " + f"{value}"
         value_str = apf.translate_and_prefix_label(value_str, translation_dict, bm=False)
@@ -973,6 +1033,7 @@ def get_labels_and_title(
 
     show_modelname_in_title: bool = False,
     show_modelname_in_label: bool = True,
+
     ):
     if midx is None:
         midx = iteration
@@ -1008,10 +1069,12 @@ def get_labels_and_title(
 
         if sweep_dict is None:
             df_parameters = import_csv_to_df(input_folder, modelfolder, modelname, "-parameters.csv", data_export)
-            df_terminals = import_csv_to_df(input_folder, modelfolder, modelname, "-terminals.csv", data_export) if "V_Grid" in all_parameters else None
+            df_terminals = import_csv_to_df(input_folder, modelfolder, modelname, "-terminals.csv", data_export)
+
         else:
             df_parameters = import_csv_to_df_sweep(iteration, input_folder, modelfolder, modelname, sweep_dict, "-parameters.csv", data_export, left_out_lines)
-            df_terminals = import_csv_to_df_sweep(iteration, input_folder, modelfolder, modelname, sweep_dict, "-terminals.csv", data_export, left_out_lines) if "V_Grid" in all_parameters else None
+            df_terminals = import_csv_to_df_sweep(iteration, input_folder, modelfolder, modelname, sweep_dict, "-terminals.csv", data_export, left_out_lines)
+
 
         if title_parameters is not None:
             title += ", " + display_params(title_parameters, df_parameters, translation_dict, df_terminals=df_terminals) 
@@ -1213,11 +1276,12 @@ def zaxis_plot(
 
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
+        left_out_lines_str = f"--left_out_{left_out_lines}" if len(left_out_lines_list) > 1 else ""
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
         apf.finalize_layout_and_save_figure(
             fig, ax, fraction=fraction,
-            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{iterations_str}",
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}{left_out_lines_str}{iterations_str}",
             )
 
 ##############################################################################
@@ -1431,11 +1495,12 @@ def yaxis_plot(
 
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
+        left_out_lines_str = f"--left_out_{left_out_lines}" if len(left_out_lines_list) > 1 else ""
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
 
         apf.finalize_layout_and_save_figure(
             fig, ax, fraction=fraction,
-            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}",
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{left_out_lines_str}{iterations_str}",
             )
 
 ##############################################################################
@@ -1640,10 +1705,11 @@ def xaxis_plot(
         groupname_clean = groupname.replace(r"\enquote", "").replace("\"", "_").replace("{", "").replace("}", "")
         clean_yparam = re.sub(r"\s*\(.*?\)", "", str(yparam)) 
         iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
+        left_out_lines_str = f"--left_out_{left_out_lines}" if len(left_out_lines_list) > 1 else ""
 
         apf.finalize_layout_and_save_figure(
             fig, ax, fraction=fraction,
-            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{iterations_str}",
+            path = plot_output_folder / f"{groupname_clean}-{clean_yparam}_over_{xparam}--{"__".join(map(str, plot_z))}{left_out_lines_str}{iterations_str}",
             )
 
 
@@ -1824,13 +1890,14 @@ def xyplane_plot(
                 model_label = translation_dict[model_label] if translation_dict and model_label in translation_dict else model_label
                 clean_zparam = re.sub(r"\s*\(.*?\)", "", str(zparam)) 
                 z_value = meaned_values_float.get("z", None)
-                iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
 
+                iterations_str = "--" + "__".join(map(str, only_iterations)) if only_iterations is not None else ""
+                left_out_lines_str = f"--left_out_{left_out_lines}" if len(left_out_lines_list) > 1 else ""
 
                 apf.finalize_layout_and_save_figure(
                     fig, ax, fraction=fraction, aspect_ratio=1.0,
                     skip_ylabel_positioning=True,
-                    path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{iterations_str}",
+                    path = plot_output_folder / f"{model_label}-{clean_zparam}_over_{xparam}{yparam}_plane-{z_value}{left_out_lines_str}{iterations_str}",
                     )
 
 ##############################################################################
