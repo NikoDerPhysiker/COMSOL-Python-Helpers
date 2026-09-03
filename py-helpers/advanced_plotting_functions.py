@@ -1,6 +1,18 @@
 # Author: Niko Bleidistel
 # last change: 2026-08-19
 
+"""
+call "finalize_layout_and_save_figure(fig, ax, fraction=1.0), path = ..., )"
+to apply the style provided by the functions in this file to a matplotlib figure and axes.
+
+use "standard_scatter_plot(...)" or its dataframe wrapper "standard_scatter_plot_df(...)" to automatically apply the "prefix style" to labels.
+label are best provided in one of the following forms
+- "variable = value [unit]"
+- "variable [unit] = value"
+to allow automatic SI prefixing of the unit based on the magnitude of the value. LaTeX math blocks should be handled correctly.
+Hint: The equal sign hints that a prefix should be applied to the unit, while the absence of an equal sign will leave the label unchanged.
+"""
+
 ##############################################################################
 # import packages
 ##############################################################################
