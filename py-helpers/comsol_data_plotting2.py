@@ -317,7 +317,8 @@ def add_magnetic_theory_02_00(
         Bidx: int,
         min_distance:float = 1.5e-6,
         z_pos: float | None = None,
-        withsupply: bool = False,
+        withsupply: bool = True,
+        x_withsupply: bool = True,
         color: str = "tab:red",
         mark_z: bool = True,
         )-> tuple[matplotlib.figure.Figure, matplotlib.axes.Axes]:
@@ -392,7 +393,7 @@ def add_magnetic_theory_02_00(
     mask = df_parameters["name"] == "I_conductor_B_plus_terminal"
     I_conBp = df_parameters.loc[mask, "evaluated_value"].iloc[0]
 
-    if withsupply:
+    if withsupply or (x_withsupply and xparam == "x"):
         # calculate conductor arm points
         mask = df_parameters["name"] == "arm_angle_B"
         conB_angle = df_parameters.loc[mask, "evaluated_value"].iloc[0]
@@ -443,6 +444,7 @@ def add_magnetic_theory_02_00(
 
     # get y values
     y = [np.nan] * len(x)
+    y_supply = [np.nan] * len(x)
     for i, x_val in enumerate(x):
         # Determine the position
         z_pos = z_pos if z_pos is not None else 0.0
@@ -491,11 +493,13 @@ def add_magnetic_theory_02_00(
                 )
         B += np.array(B_BM)
 
-        if withsupply:
+        y[i]=B[Bidx]
+
+        if withsupply or (x_withsupply and xparam == "x"):
             # arm conductors
             B_PP_arm = tfm.biot_savart_rectangular_conductor(
                         pos = pos,
-                        R_con = [p0_pp, p1_pp],
+                        R_con = [p1_pp, p0_pp], # first point with lower x value
                         I = I_conBp,
                         width_vec = (0, conB_width, 0),
                         height_vec = (0, 0, conB_height),
@@ -506,7 +510,7 @@ def add_magnetic_theory_02_00(
 
             B_MP_arm = tfm.biot_savart_rectangular_conductor(
                         pos = pos,
-                        R_con = [p0_mp, p1_mp],
+                        R_con = [p0_mp, p1_mp], # first point with lower x value
                         I = I_conBp,
                         width_vec = (0, conB_width, 0),
                         height_vec = (0, 0, conB_height),
@@ -517,7 +521,7 @@ def add_magnetic_theory_02_00(
 
             B_MM_arm = tfm.biot_savart_rectangular_conductor(
                         pos = pos,
-                        R_con = [p0_mm, p1_mm],
+                        R_con = [p0_mm, p1_mm], # first point with lower x value
                         I = I_conBm,
                         width_vec = (0, conB_width, 0),
                         height_vec = (0, 0, conB_height),
@@ -528,8 +532,8 @@ def add_magnetic_theory_02_00(
 
             B_PM_arm = tfm.biot_savart_rectangular_conductor(
                         pos = pos,
-                        R_con = [p0_pm, p1_pm],
-                        I = I_conBm,
+                        R_con = [p1_pm, p0_pm], # first point with lower x value
+                        I = I_conBm, 
                         width_vec = (0, conB_width, 0),
                         height_vec = (0, 0, conB_height),
                         num_w = numB_w,
@@ -537,18 +541,24 @@ def add_magnetic_theory_02_00(
                     )
             B += np.array(B_PM_arm)
 
-        y[i]=B[Bidx]
-
-    
-    theory_name = fr"Biot-Savart (${numB_w} \times {numB_h}$)"
+            y_supply[i] = B[Bidx]
+   
     if not xparam == "z" and mark_z:
         z_value_str = r"$z =" + f" {z_pos}" + r" [\mathrm{m}]$"
         z_value_str = apf.set_prefix_in_number_unit_string(z_value_str, bm=False)
-        label = z_value_str + ", " + theory_name
+        label = z_value_str 
     else:
-        label = theory_name
+        label = ""
 
-    ax.plot(x, y, label=label, color=color)#, s=apf.MARKERSIZE)
+    theory_name = fr"Biot-Savart (${numB_w} \times {numB_h}$)"
+    ax.plot(x, y, label=label + ", " + theory_name, color=color)#, s=apf.MARKERSIZE)
+
+    if not withsupply and not (x_withsupply and xparam == "x"):
+        print("exiting without supply curve")
+        return fig, ax
+    else:
+        theory_name = fr"Biot-Savart with supply"
+        ax.plot(x, y_supply, label=label + ", " + theory_name, color=color, linestyle='--')#, s=apf.MARKERSIZE)
 
     return fig, ax
 

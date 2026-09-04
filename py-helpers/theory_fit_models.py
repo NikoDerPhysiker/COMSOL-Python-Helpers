@@ -94,7 +94,7 @@ def biot_savart_rectangular_conductor(
     
     Args:
         pos (tuple[float, float, float])            : Observation point (x, y, z)
-        R_con (list[tuple[float, float, float]])    : List of two points defining the conductor's axis (centerline of the conductor)
+        R_con (list[tuple[float, float, float]])    : List of two points defining the conductor's axis (centerline of the conductor). ATTENTION: Order matters for the direction of the current.
         I (float)                                   : Total current flowing through the conductor
         isclose_tol (float)                         : Tolerance for the underlying filament function
 
